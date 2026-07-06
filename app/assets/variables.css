@@ -1,0 +1,17 @@
+:root {
+    --nav-bar-bg: #fff;
+    --nav-item-bg-color: #fff;
+    --nav-item-bg-hover-color: #f1f1f1;
+    --nav-item-bg-active-color: #419fd9;
+    --nav-item-text-active-color: #fff;
+    --nav-bar-text-color: #000;
+    --border-color: #e7e7e7;
+    --message-bg-color: #fff;
+    --message-text-color: #000;
+    --message-author-color: #e7831b;
+    --message-chat-bg-color: #9ec087;
+    --message-time-color: #999999;
+    --input-field-bg-color: #f1f1f1;
+    --input-field-placeholder-color: #f1f1f1;
+}
+
