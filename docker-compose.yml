@@ -1,0 +1,84 @@
+version: '3.8'
+
+services:
+  db:
+    image: mysql:8
+    container_name: xpro_db
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpassword
+      MYSQL_DATABASE: xpro_support_db
+      MYSQL_USER: xpro
+      MYSQL_PASSWORD: rootpassword
+    ports:
+      - "3306:3306"
+    volumes:
+      - db_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin" ,"ping", "-h", "localhost"]
+      timeout: 20s
+      retries: 10
+
+  phpmyadmin:
+    image: phpmyadmin/phpmyadmin
+    container_name: xpro_phpmyadmin
+    restart: unless-stopped
+    ports:
+      - "8080:80"
+    environment:
+      PMA_HOST: db
+      MYSQL_ROOT_PASSWORD: rootpassword
+    depends_on:
+      db:
+        condition: service_healthy
+
+  api:
+    build:
+      context: ./api
+      dockerfile: Dockerfile
+    container_name: xpro_api
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=mysql+aiomysql://root:rootpassword@db:3306/xpro_support_db
+      - AUTH_JWT_SECRET=your-secret-key-here
+      - AUTH_JWT_ALG=HS256
+      - AUTH_JWT_EXP_MINUTES=15
+      - AUTH_REFRESH_TOKEN_KEY=your-secret-secret-key-here
+      - AUTH_REFRESH_TOKEN_EXP=30d
+      - AUTH_SECURE_COOKIES=false
+      - TG_BOT_TOKEN=/
+      - CORS_ORIGINS=http://localhost:3000
+    depends_on:
+      db:
+        condition: service_healthy
+
+  bot:
+    build:
+      context: ./bot
+      dockerfile: Dockerfile
+    container_name: xpro_bot
+    restart: unless-stopped
+    environment:
+      - TG_BOT_TOKEN=/
+      - DATABASE_URL=mysql+aiomysql://root:rootpassword@db:3306/xpro_support_db
+    depends_on:
+      db:
+        condition: service_healthy
+      api:
+        condition: service_started
+
+  front:
+    build:
+      context: ./front
+      dockerfile: Dockerfile
+    container_name: xpro_front
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    depends_on:
+      - api
+
+volumes:
+  db_data:

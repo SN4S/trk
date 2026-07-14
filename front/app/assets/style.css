@@ -1,0 +1,66 @@
+* body {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+  font-family:
+    -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue',
+    Arial, sans-serif;
+}
+
+.chat_block {
+  background: url('@/assets/img/chat_bg.png') no-repeat;
+  background-size: 100% 100%;
+  flex: 1 1 100%;
+}
+
+a {
+  display: block;
+  width: 100%;
+  height: 100%;
+  text-decoration: none;
+  color: black;
+}
+
+img {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+input, textarea {
+    box-sizing: border-box;
+    background-color: var(--input-field-bg-color);
+    border-radius: var(--radius);
+    padding-left: 1rem;
+    border: none;
+    width: 100%;
+    line-height: 28px;
+    outline: none;
+}
+
+input:focus, textarea:focus,
+input:active, textarea:active {
+    background-color: var(--nav-bar-bg);
+    border: var(--border);
+}
+
+button {
+    background-color: var(--accent);
+    border-radius: var(--radius);
+    border: none;
+    line-height: 34px;
+    color: var(--second-test-color);
+}
+
+button:hover {
+    background-color: var(--accent-dark);
+}
+
+.chat_block{
+    border-left: var(--border);
+}
+
+.small_icon {
+    height: 20px;
+    width: 20px;
+}

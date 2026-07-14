@@ -1,75 +1,37 @@
-# Nuxt Minimal Starter
+# XproSupport
 
-Look at the [Nuxt documentation](https://nuxt.com/docs/getting-started/introduction) to learn more.
+Проект складається з трьох основних частин:
+- **API** 
+- **Telegram бот** 
+- **Frontend** 
 
-## Setup
+---
 
-Make sure to install dependencies:
+## 🚀 Швидкий старт та опис компонентів
 
+### 1. API (Бекенд)
+При запуску API та застосуванні міграцій створюється база даних, яка автоматично заповнюється тестовими даними (користувачами, групами, темами, папками та тікетами). Їх достатньо для повноцінного перегляду роботи фронтенду, тестування глобального чату, системи папок і адмінпанелі.
+
+### 2. Telegram Бот
+Бот відповідає за комунікацію з кінцевими користувачами.
+
+**ВІДПОВІДІ НА ТІКЕТИ ПРАЦЮВАТИМУТЬ ЛИШЕ В ДОДАНИХ ГРУПАХ ЧЕРЕЗ БОТА ЗІ СПРАВЖНІМИ ID ГРУПИ. 
+ЯКЩО ВІДПОВІСТИ НА НЕСПРАВЖНІЙ ТІКЕТ ТО БОТ МОЖЕ ВПАСТИ**
+
+**МОЖНА З ТЕСТОВИМИ ДАНИМИ РОБИТИ ВСЕ КРІМ ВІДПОВІДАТИ**
+
+**Як тестувати:**
+1. Створіть нову Telegram групу (або візьміть існуючу) і додайте туди вашого бота.
+2. Напишіть у групі команду `/setup`.
+3. Бот запостить повідомлення з кнопкою для звернення в підтримку.
+4. При натисканні на цю кнопку користувач буде перенаправлений у приватні повідомлення з ботом, де він зможе відкрити тікет і спілкуватися зі службою підтримки.
+
+## Запуск через Docker
 ```bash
-# npm
-npm install
-
-# pnpm
-pnpm install
-
-# yarn
-yarn install
-
-# bun
-bun install
+docker-compose up -d --build
 ```
 
-## Development Server
-
-Start the development server on `http://localhost:3000`:
-
-```bash
-# npm
-npm run dev
-
-# pnpm
-pnpm dev
-
-# yarn
-yarn dev
-
-# bun
-bun run dev
-```
-
-## Production
-
-Build the application for production:
-
-```bash
-# npm
-npm run build
-
-# pnpm
-pnpm build
-
-# yarn
-yarn build
-
-# bun
-bun run build
-```
-
-Locally preview production build:
-
-```bash
-# npm
-npm run preview
-
-# pnpm
-pnpm preview
-
-# yarn
-yarn preview
-
-# bun
-bun run preview
-```
-
-Check out the [deployment documentation](https://nuxt.com/docs/getting-started/deployment) for more information.
+Користувачі для входу: 
+- Логін: admin, Пароль: changeme
+- Логін: agent_joe, Пароль: changeme
+- Логін: agent_alice, Пароль: changeme

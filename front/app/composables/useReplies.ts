@@ -1,0 +1,120 @@
+import type {ApiTicket} from "~/composables/useTickets";
+
+export interface ApiReply {
+    id: number
+    ticket_id: number
+    message: string
+    is_support: boolean
+    user_id: number | null
+    created_at: string
+
+    ticket: { id: number; name: string ;soc_user_name:string } | null
+    user: { id: number; username: string } | null
+}
+
+
+export function useRepliesT(ticketId?: MaybeRef<number | null>) {
+    const { apiFetch } = useApi()
+    const { filter } = useFilter()
+
+    const replies = ref<ApiReply[]>([])
+    const pending = ref(false)
+    const error = ref<string | null>(null)
+
+    async function fetchReplies() {
+        pending.value = true
+        error.value = null
+
+        const tid = toValue(ticketId)
+
+        // Build query params — only include non-null/non-empty values
+        const params: Record<string, string | number> = {}
+
+        if (tid !== null && tid !== undefined) params.ticket_id = tid
+        if (filter.status) params.status = filter.status
+        if (filter.themeId !== null) params.theme_id = filter.themeId
+        if (filter.search.trim()) params.search = filter.search.trim()
+
+        const { currentUser } = useAuth()
+        if (filter.assignedToMe && currentUser.value) {
+            const role = currentUser.value.role
+            if (role === 'support') {
+                params.assigned_to_id = currentUser.value.id
+            } else if (role === 'admin' || role === 'manager') {
+                params.assigned_by_id = currentUser.value.id
+            }
+        }
+
+        try {
+            replies.value = await apiFetch<ApiReply[]>('/tickets/'+ tid + '/replies/', { params })
+        } catch (e: any) {
+            error.value = e?.data?.detail ?? 'Failed to load relies'
+        } finally {
+            pending.value = false
+        }
+    }
+
+    // Refetch when any filter value or the group changes
+    watch(
+        [() => toValue(ticketId), () => filter.search, () => filter.status, () => filter.themeId, () => filter.assignedToMe],
+        () => fetchReplies(),
+        { immediate: true },
+    )
+
+    return { replies, pending, error, fetchReplies }
+}
+
+export function useRepliesG(groupId?: MaybeRef<number | null>) {
+    const { apiFetch } = useApi()
+    const { filter } = useFilter()
+
+    const replies = ref<ApiReply[]>([])
+    const pending = ref(false)
+    const error = ref<string | null>(null)
+
+    async function fetchReplies() {
+        pending.value = true
+        error.value = null
+
+        const gid = toValue(groupId)
+
+        // Build query params — only include non-null/non-empty values
+        const params: Record<string, string | number> = {}
+
+        if (gid !== null && gid !== undefined) params.group_id = gid
+        if (filter.status) params.status = filter.status
+        if (filter.themeId !== null) params.theme_id = filter.themeId
+        if (filter.search.trim()) params.search = filter.search.trim()
+
+        const { currentUser } = useAuth()
+        if (filter.assignedToMe && currentUser.value) {
+            const role = currentUser.value.role
+            if (role === 'support') {
+                params.assigned_to_id = currentUser.value.id
+            } else if (role === 'admin' || role === 'manager') {
+                params.assigned_by_id = currentUser.value.id
+            }
+        }
+
+        try {
+            if (gid !== null && gid !== undefined) {
+                replies.value = await apiFetch<ApiReply[]>('/groups/'+ gid + '/replies', { params })
+            } else {
+                replies.value = await apiFetch<ApiReply[]>('/replies', { params })
+            }
+        } catch (e: any) {
+            error.value = e?.data?.detail ?? 'Failed to load replies'
+        } finally {
+            pending.value = false
+        }
+    }
+
+    // Refetch when any filter value or the group changes
+    watch(
+        [() => toValue(groupId), () => filter.search, () => filter.status, () => filter.themeId, () => filter.assignedToMe],
+        () => fetchReplies(),
+        { immediate: true },
+    )
+
+    return { replies, pending, error, fetchReplies }
+}
