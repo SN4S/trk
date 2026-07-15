@@ -5,6 +5,7 @@ from pydantic import BaseModel, Field, model_validator
 
 from src.schemas import UtcDatetime
 from src.tickets.models import TicketStatus
+from src.replies.schemas import ReplyOut
 
 
 class TicketCreate(BaseModel):
@@ -98,15 +99,27 @@ class TicketStats(BaseModel):
 
 class GeneralChatMessageCreate(BaseModel):
     message: str = Field(min_length=1, max_length=4000)
+    parent_id: int | None = None
+
+
+class GeneralChatParentPreview(BaseModel):
+    id: int
+    message: str
+    user: UserInTicket | None = None
+    model_config = {"from_attributes": True}
 
 
 class GeneralChatMessageOut(BaseModel):
     id: int
     ticket_id: int | None
+    reply_id: int | None
+    parent_id: int | None
     user_id: int
     message: str
     created_at: UtcDatetime
     ticket: TicketOut | None = None
+    reply: ReplyOut | None = None
+    parent: GeneralChatParentPreview | None = None
     user: UserInTicket | None = None
 
     model_config = {"from_attributes": True}

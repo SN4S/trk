@@ -36,7 +36,6 @@ def upgrade() -> None:
         sa.ForeignKeyConstraint(['ticket_id'], ['ticket.id'], name='fk_ticket_assignment_ticket', ondelete='CASCADE'),
         sa.PrimaryKeyConstraint('id'),
     )
-    op.create_index('ix_ticket_assignment_ticket_id', 'ticket_assignment', ['ticket_id'])
 
     # Step 2: Migrate existing assignments into the audit table.
     # We use the admin user (id from seed: the first user with role='admin') as assigned_by.
@@ -103,5 +102,4 @@ def downgrade() -> None:
     """))
 
     # Drop the new table
-    op.drop_index('ix_ticket_assignment_ticket_id', table_name='ticket_assignment')
     op.drop_table('ticket_assignment')

@@ -1,17 +1,25 @@
 <template>
   <div class="input_container">
     <!-- Reply Banner -->
-    <div v-if="replyingToTicket" class="reply_banner">
+    <div v-if="replyingToTicket || replyingToMessage" class="reply_banner">
       <div class="reply_info">
-        <span class="reply_label">Відповідь на тікет: {{replyingToTicket.ticket_num}}</span>
-        <span class="reply_user">{{ replyingToTicket.soc_user_name }}</span>
-        <span class="reply_text">{{ replyingToTicket.message }}</span>
+        <template v-if="replyingToTicket">
+          <span class="reply_label">Відповідь на тікет: {{replyingToTicket.ticket_num}}</span>
+          <span class="reply_user">{{ replyingToTicket.soc_user_name }}</span>
+          <span class="reply_text">{{ replyingToTicket.message }}</span>
+        </template>
+        <template v-else-if="replyingToMessage">
+          <span class="reply_label">Відповідь</span>
+          <span class="reply_user">{{ replyingToMessage.sender }}</span>
+          <span class="reply_text">{{ replyingToMessage.text }}</span>
+        </template>
       </div>
       <button class="cancel_reply" @click="emit('cancelReply')" title="Скасувати">✕</button>
     </div>
 
     <!-- Input Bar -->
     <div class="input_bar">
+      <div class="mention-wrap">
       <input 
         id="message-f" 
         placeholder="Написати..." 
@@ -19,6 +27,10 @@
         @input="onInput"
         @keydown="onKeydown"
       />
+        <ul v-if="showMentions" class="mention-list">
+          <li v-for="u in filteredUsers" :key="u.id" @mousedown.prevent="pickMention(u.username)">@{{ u.username }}</li>
+        </ul>
+      </div>
       <div v-if="!hideCheckbox" class="checkbox-wrapper" title="Необхідна відповідь від клієнта">
         <input 
           id="check" 
@@ -28,7 +40,7 @@
         />
         <label for="check">❓</label>
       </div>
-      <button @click="onSend" :disabled="!modelValue.trim() && !replyingToTicket">➤</button>
+      <button @click="onSend" :disabled="!modelValue.trim() && !replyingToTicket && !replyingToMessage">➤</button>
     </div>
   </div>
 </template>
@@ -39,9 +51,30 @@ import type { ApiTicket } from '~/composables/useTickets'
 const props = defineProps<{
   modelValue: string
   replyingToTicket?: ApiTicket | null
+  replyingToMessage?: { sender: string; text: string } | null
   requiresClientReply?: boolean
   hideCheckbox?: boolean
 }>()
+
+import { useMentionableUsers } from '~/composables/useMentionableUsers'
+const { users: mentionableUsers } = useMentionableUsers()
+
+const mentionQuery = computed(() => {
+  const m = props.modelValue.match(/@(\w*)$/)
+  return m ? m[1] : null
+})
+
+const filteredUsers = computed(() => {
+  if (mentionQuery.value === null) return []
+  const q = mentionQuery.value.toLowerCase()
+  return mentionableUsers.value.filter(u => u.username.toLowerCase().startsWith(q)).slice(0, 6)
+})
+
+const showMentions = computed(() => mentionQuery.value !== null && filteredUsers.value.length > 0)
+
+function pickMention(username: string) {
+  emit('update:modelValue', props.modelValue.replace(/@(\w*)$/, `@${username} `))
+}
 
 const emit = defineEmits<{
   (e: 'update:modelValue', val: string): void
@@ -55,9 +88,7 @@ function onInput(e: Event) {
 }
 
 function onSend() {
-  if (props.modelValue.trim() || props.replyingToTicket) {
-    emit('send')
-  }
+  if (props.modelValue.trim() || props.replyingToTicket || props.replyingToMessage) emit('send')
 }
 
 function onKeydown(e: KeyboardEvent) {
@@ -132,8 +163,8 @@ function onKeydown(e: KeyboardEvent) {
   align-items: center;
 }
 
-.input_bar #message-f {
-  flex: 1;
+.mention-wrap #message-f {
+  width: 100%;
   background: var(--nav-item-bg-hover-color);
   border: none;
   border-radius: 20px;
@@ -141,6 +172,24 @@ function onKeydown(e: KeyboardEvent) {
   color: var(--message-text-color);
   outline: none;
 }
+
+.mention-wrap { position: relative; flex: 1; }
+.mention-list {
+  position: absolute;
+  bottom: calc(100% + 4px);
+  left: 0;
+  background: var(--message-bg-color);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+  min-width: 160px;
+  max-height: 180px;
+  overflow-y: auto;
+  z-index: 50;
+  padding: 4px 0;
+}
+.mention-list li { padding: 6px 12px; font-size: 13px; cursor: pointer; }
+.mention-list li:hover { background: var(--nav-item-bg-hover-color); }
 
 .input_bar #check {
   width: 24px;

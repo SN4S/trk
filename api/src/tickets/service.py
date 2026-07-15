@@ -4,7 +4,13 @@ from sqlalchemy.orm import selectinload
 
 from src.themes.models import Theme
 from src.tickets.models import Ticket, TicketStatus, GeneralChatMessage, TicketAssignment
+from src.replies.models import Reply
 
+import re
+from src.auth.models import User
+
+MENTION_TOKEN = re.compile(r'@\[(\d+):([^\]]+)\]')
+RAW_MENTION = re.compile(r'@(\w+)')
 
 def _ticket_options():
     """Shared eager-load options for ticket queries."""
@@ -162,39 +168,57 @@ async def delete(db: AsyncSession, ticket: Ticket) -> None:
     await db.commit()
 
 async def forward_to_general_chat(db: AsyncSession, ticket_id: int, user_id: int, message: str) -> GeneralChatMessage:
-    chat_message = GeneralChatMessage(
-        ticket_id=ticket_id,
-        user_id=user_id,
-        message=message
-    )
+    chat_message = GeneralChatMessage(ticket_id=ticket_id, user_id=user_id, message=message)
     db.add(chat_message)
     await db.commit()
-    
+    return await _get_general_chat_message(db, chat_message.id)
+
+async def _encode_mentions(db: AsyncSession, message: str) -> str:
+    names = set(RAW_MENTION.findall(message))
+    if not names:
+        return message
+    result = await db.execute(select(User).where(User.username.in_(names)))
+    lookup = {u.username: u.id for u in result.scalars()}
+
+    def repl(m: re.Match) -> str:
+        uname = m.group(1)
+        uid = lookup.get(uname)
+        return f"@[{uid}:{uname}]" if uid else m.group(0)
+
+    return RAW_MENTION.sub(repl, message)
+
+
+async def create_general_chat_message(db: AsyncSession, user_id: int, message: str, parent_id: int | None = None) -> GeneralChatMessage:
+    message = await _encode_mentions(db, message)
+    chat_message = GeneralChatMessage(user_id=user_id, message=message, parent_id=parent_id)
+    db.add(chat_message)
+    await db.commit()
+    return await _get_general_chat_message(db, chat_message.id)
+
+
+async def forward_reply_to_general_chat(db: AsyncSession, ticket_id: int, reply_id: int, user_id: int, message: str) -> GeneralChatMessage:
+    chat_message = GeneralChatMessage(ticket_id=ticket_id, reply_id=reply_id, user_id=user_id, message=message)
+    db.add(chat_message)
+    await db.commit()
+    return await _get_general_chat_message(db, chat_message.id)
+
+
+async def _get_general_chat_message(db: AsyncSession, message_id: int) -> GeneralChatMessage:
     q = (
         select(GeneralChatMessage)
         .options(
+            selectinload(GeneralChatMessage.user),
             selectinload(GeneralChatMessage.ticket).selectinload(Ticket.theme),
-            selectinload(GeneralChatMessage.ticket).selectinload(Ticket.group)
+            selectinload(GeneralChatMessage.ticket).selectinload(Ticket.group),
+            selectinload(GeneralChatMessage.ticket).selectinload(Ticket.assignments).selectinload(TicketAssignment.assigned_to),
+            selectinload(GeneralChatMessage.ticket).selectinload(Ticket.assignments).selectinload(TicketAssignment.assigned_by),
+            selectinload(GeneralChatMessage.reply).selectinload(Reply.user),
+            selectinload(GeneralChatMessage.parent).selectinload(GeneralChatMessage.user),
         )
-        .where(GeneralChatMessage.id == chat_message.id)
+        .where(GeneralChatMessage.id == message_id)
     )
-    result = await db.execute(q)
-    return result.scalars().first()
+    return (await db.execute(q)).scalars().first()
 
-async def create_general_chat_message(db: AsyncSession, user_id: int, message: str) -> GeneralChatMessage:
-    chat_message = GeneralChatMessage(
-        user_id=user_id,
-        message=message
-    )
-    db.add(chat_message)
-    await db.commit()
-    
-    q = (
-        select(GeneralChatMessage)
-        .where(GeneralChatMessage.id == chat_message.id)
-    )
-    result = await db.execute(q)
-    return result.scalars().first()
 
 async def get_general_chat_messages(db: AsyncSession) -> list[GeneralChatMessage]:
     q = (
@@ -202,9 +226,12 @@ async def get_general_chat_messages(db: AsyncSession) -> list[GeneralChatMessage
         .options(
             selectinload(GeneralChatMessage.user),
             selectinload(GeneralChatMessage.ticket).selectinload(Ticket.theme),
-            selectinload(GeneralChatMessage.ticket).selectinload(Ticket.group)
+            selectinload(GeneralChatMessage.ticket).selectinload(Ticket.group),
+            selectinload(GeneralChatMessage.ticket).selectinload(Ticket.assignments).selectinload(TicketAssignment.assigned_to),
+            selectinload(GeneralChatMessage.ticket).selectinload(Ticket.assignments).selectinload(TicketAssignment.assigned_by),
+            selectinload(GeneralChatMessage.reply).selectinload(Reply.user),
+            selectinload(GeneralChatMessage.parent).selectinload(GeneralChatMessage.user),
         )
         .order_by(GeneralChatMessage.created_at.asc())
     )
-    result = await db.execute(q)
-    return list(result.scalars().all())
+    return list((await db.execute(q)).scalars().all())

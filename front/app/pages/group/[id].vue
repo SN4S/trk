@@ -2,7 +2,7 @@
   <div class="chat_block" @click="closeMenu">
     <div class="messageArea" ref="messageAreaRef" @scroll="handleScroll">
       <template v-for="item in feed" :key="`${item.type}-${item.id}`">
-        <chat-message v-if="item.type === 'reply'" :message="item.data" :is-me="item.data.user?.username === currentUser?.username">
+        <chat-message v-if="item.type === 'reply'" :message="item.data" :is-me="item.data.user?.username === currentUser?.username" @contextmenu.prevent="openReplyMenu($event, item.data)">
           <template #extra>
             <div class="parent-ticket-link">
               <a :href="`#ticket-${item.data.ticket_id}`">↑ До тікету #{{ item.data.ticket?.ticket_num || item.data.ticket_id }}</a>
@@ -33,28 +33,12 @@
     />
 
     <!-- Context Menu for "Reply" -->
-    <div 
-      v-if="menu.show" 
-      class="ctx-menu" 
-      :style="{ top: menu.y + 'px', left: menu.x + 'px' }"
-      @click.stop
-    >
-      <button 
-        class="ctx-item"
-        @click="setReplyTicket"
-      >
-        ↩ Відповісти
-      </button>
-      <div class="ctx-divider"></div>
-      <button
-        class="ctx-item"
-        @click="forwardToGeneralChat"
-        >
-        ➦ В глобальний чат
-      </button>
+    <div v-if="menu.show" class="ctx-menu" :style="{ top: menu.y + 'px', left: menu.x + 'px' }" @click.stop>
+      <button v-if="menu.type === 'ticket'" class="ctx-item" @click="setReplyTicket">↩ Відповісти</button>
+      <div v-if="menu.type === 'ticket'" class="ctx-divider"></div>
+      <button class="ctx-item" @click="forwardActiveItem">➦ В глобальний чат</button>
 
-      <!-- Assignment options for Admin/Manager -->
-      <template v-if="currentUser?.role === 'admin' || currentUser?.role === 'manager'">
+      <template v-if="menu.type === 'ticket' && (currentUser?.role === 'admin' || currentUser?.role === 'manager')">
         <div class="ctx-divider"></div>
         <div class="ctx-header">Призначити:</div>
         <form-select
@@ -67,6 +51,7 @@
         />
       </template>
     </div>
+
     <button v-if="showGoDown" class="goDown" @click="scrollToSection">↓</button>
   </div>
 </template>
@@ -189,17 +174,20 @@ const menu = ref({
   show: false,
   x: 0,
   y: 0,
-  ticket: null as ApiTicket | null
+  type: null as 'ticket' | 'reply' | null,
+  ticket: null as ApiTicket | null,
+  reply: null as ApiReply | null,
 })
 
 function openTicketMenu(e: MouseEvent, ticket: ApiTicket) {
   document.removeEventListener('click', closeMenu)
-  menu.value = {
-    show: true,
-    x: e.clientX,
-    y: e.clientY,
-    ticket
-  }
+  menu.value = { show: true, x: e.clientX, y: e.clientY, type: 'ticket', ticket, reply: null }
+  document.addEventListener('click', closeMenu, { once: true })
+}
+
+function openReplyMenu(e: MouseEvent, reply: ApiReply) {
+  document.removeEventListener('click', closeMenu)
+  menu.value = { show: true, x: e.clientX, y: e.clientY, type: 'reply', ticket: null, reply }
   document.addEventListener('click', closeMenu, { once: true })
 }
 
@@ -216,10 +204,13 @@ function setReplyTicket() {
   document.getElementById('message-f')?.focus()
 }
 
-async function forwardToGeneralChat() {
-  if (!menu.value.ticket) return
+async function forwardActiveItem() {
   try {
-    await apiFetch(`/tickets/${menu.value.ticket.id}/forward`, { method: 'POST' })
+    if (menu.value.type === 'ticket' && menu.value.ticket) {
+      await apiFetch(`/tickets/${menu.value.ticket.id}/forward`, { method: 'POST' })
+    } else if (menu.value.type === 'reply' && menu.value.reply) {
+      await apiFetch(`/tickets/${menu.value.reply.ticket_id}/replies/${menu.value.reply.id}/forward`, { method: 'POST' })
+    }
     alert("Успішно переслано у глобальний чат")
   } catch (e: any) {
     alert(e?.data?.detail ?? 'Помилка пересилки')

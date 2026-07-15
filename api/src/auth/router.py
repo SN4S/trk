@@ -6,11 +6,14 @@ from sqlalchemy.exc import IntegrityError
 
 from src.auth import service
 from src.auth.config import auth_settings
-from src.auth.dependencies import CurrentUser
+from src.auth.dependencies import CurrentUser, RequireRole
 from src.auth.exceptions import InvalidToken
 from src.auth.schemas import AccessTokenResponse, LoginRequest, UserOut, RegisterRequest, UserUpdateRequest
 from src.auth.utils import create_access_token
+from src.auth.models import User
 from src.database import get_db
+from sqlalchemy import select
+
 
 router = APIRouter(
     prefix="/auth",
@@ -75,21 +78,24 @@ async def logout(
         await service.revoke_refresh_token(db, refresh_token)
     response.delete_cookie(REFRESH_COOKIE, path="/auth")
 
-
 @router.get("/me", response_model=UserOut)
 async def me(user: CurrentUser):
     return user
-
-from src.auth.dependencies import RequireRole
-from sqlalchemy import select
 
 @router.get("/users", response_model=list[UserOut])
 async def list_users(
     _: Annotated[CurrentUser, Depends(RequireRole(["admin", "manager"]))],
     db: Annotated[AsyncSession, Depends(get_db)]
 ):
-    from src.auth.models import User
     result = await db.execute(select(User))
+    return list(result.scalars().all())
+
+@router.get("/users/mentionable", response_model=list[UserOut])
+async def list_mentionable_users(
+    _: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)]
+):
+    result = await db.execute(select(User).where(User.is_active == True))
     return list(result.scalars().all())
 
 @router.put("/users/{user_id}", response_model=UserOut)

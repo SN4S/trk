@@ -64,9 +64,13 @@ class GeneralChatMessage(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     ticket_id: Mapped[int | None] = mapped_column(ForeignKey("ticket.id"), nullable=True)
+    reply_id: Mapped[int | None] = mapped_column(ForeignKey("reply.id"), nullable=True)
+    parent_id: Mapped[int | None] = mapped_column(ForeignKey("general_chat_message.id"), nullable=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("user.id"))
     message: Mapped[str] = mapped_column(String(4000))
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
     ticket: Mapped["Ticket"] = relationship()
+    reply: Mapped["Reply"] = relationship()
+    parent: Mapped["GeneralChatMessage"] = relationship(remote_side=[id])
     user: Mapped["User"] = relationship()

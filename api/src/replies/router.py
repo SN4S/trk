@@ -11,6 +11,8 @@ from src.replies.schemas import ReplyCreate, ReplyOut
 from src.tickets import service as ticket_service
 from src.tickets.exceptions import TicketNotFound
 from src.replies.service import notify_client_reply
+from src.tickets.schemas import GeneralChatMessageOut
+
 
 router = APIRouter(
     prefix="/tickets/{ticket_id}/replies",
@@ -73,3 +75,20 @@ async def delete_reply(
     if reply is None or reply.ticket_id != ticket_id:
         raise ReplyNotFound()
     await service.delete(db, reply)
+
+
+@router.post("/{reply_id}/forward", response_model=GeneralChatMessageOut, status_code=status.HTTP_201_CREATED)
+async def forward_reply(
+    ticket_id: int,
+    reply_id: int,
+    user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    ticket = await ticket_service.get_by_id(db, ticket_id)
+    if ticket is None:
+        raise TicketNotFound()
+    reply = await service.get_by_id(db, reply_id)
+    if reply is None or reply.ticket_id != ticket_id:
+        raise ReplyNotFound()
+    message = f"Переслано повідомлення з тікету #{ticket.ticket_num}:\n{reply.message}"
+    return await ticket_service.forward_reply_to_general_chat(db, ticket_id, reply_id, user.id, message)

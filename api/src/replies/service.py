@@ -90,6 +90,9 @@ async def create(
     is_support: bool,
     user_id: int | None,
 ) -> Reply:
+    from src.tickets.service import _encode_mentions
+    if is_support:
+        message = await _encode_mentions(db, message)
     reply = Reply(
         ticket_id=ticket_id,
         message=message,

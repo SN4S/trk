@@ -1,75 +1,89 @@
 <template>
   <div class="chat_block">
-    <div class="messageArea">
+    <div class="messageArea" ref="messageAreaRef" @scroll="handleScroll">
       <div v-if="pending" class="state-msg">Завантаження…</div>
       <div v-else-if="error" class="state-msg error">{{ error }}</div>
       <div v-else-if="mappedMessages.length === 0" class="state-msg muted">Повідомлень немає</div>
-      
-      <chat-message 
-        v-else 
-        v-for="msg in mappedMessages" 
-        :key="msg.id" 
-        :message="msg"
-        :is-me="msg.is_support"
-        :sender-name="msg.user?.username || 'Support'"
-        :hide-text="!!msg.ticket"
+
+      <chat-message
+          v-else
+          v-for="msg in mappedMessages"
+          :key="msg.id"
+          :id="'msg-' + msg.id"
+          :message="msg"
+          :is-me="msg.is_support"
+          :sender-name="msg.user?.username || 'Support'"
+          :hide-text="!!msg.ticket"
+          @contextmenu.prevent="openMsgMenu($event, msg)"
       >
-        <template #extra v-if="msg.ticket">
-          <div class="forwarded-card">
-            <div class="card-header">
-              <span class="icon">🎫</span>
-              <span class="title">Переслано тікет #{{ msg.ticket.ticket_num }}</span>
-              <span class="status-badge" :class="msg.ticket.status?.toLowerCase()">{{ msg.ticket.status }}</span>
+        <template #extra>
+          <div v-if="msg.parent" class="reply-quote" @click="scrollToMessage(msg.parent.id)">
+            <span class="reply-quote-user">{{ msg.parent.user?.username || 'Support' }}</span>
+            <span class="reply-quote-text">{{ msg.parent.message }}</span>
+          </div>
+          <div v-if="msg.ticket && !msg.reply" class="forwarded-message">
+            <span class="forward-label">↪ Переслано тікет від {{ msg.ticket.soc_user_name }}</span>
+            <div class="reply-quote">
+              <span class="reply-quote-user">Тікет #{{ msg.ticket.ticket_num }}</span>
+              <span class="reply-quote-text">{{ msg.ticket.message || 'Без тексту' }}</span>
             </div>
-            
-            <div class="card-body">
-              <div class="info-row">
-                <strong>Група:</strong> {{ msg.ticket.group?.name || 'Невідома група' }}
-              </div>
-              <div class="info-row">
-                <strong>Тема:</strong> {{ msg.ticket.theme?.name || 'Невідома тема' }}
-              </div>
-              <div class="info-row">
-                <strong>Від:</strong> @{{ msg.ticket.soc_user_name }}
-              </div>
-              
-              <div class="message-excerpt" v-if="msg.ticket.message">
-                "{{ msg.ticket.message.length > 100 ? msg.ticket.message.substring(0, 100) + '...' : msg.ticket.message }}"
-              </div>
-            </div>
-            
             <div class="card-actions">
               <NuxtLink :to="`/group/${msg.ticket.group_id}#ticket-${msg.ticket_id}`" class="action-btn">
-                Перейти до тікету
+                Відкрити тікет
+              </NuxtLink>
+            </div>
+          </div>
+          <div v-if="msg.reply" class="forwarded-message">
+            <span class="forward-label">↪ Переслано з тікету #{{ msg.ticket?.ticket_num }}</span>
+            <div class="reply-quote">
+              <span class="reply-quote-user">{{ msg.reply.user?.username || 'Support' }}</span>
+              <span class="reply-quote-text">{{ msg.reply.message }}</span>
+            </div>
+            <div class="card-actions">
+              <NuxtLink :to="`/group/${msg.ticket?.group_id}#ticket-${msg.ticket_id}`" class="action-btn">
+                Відкрити тікет
               </NuxtLink>
             </div>
           </div>
         </template>
       </chat-message>
+
+      <div v-if="menu.show" class="ctx-menu" :style="{ top: menu.y + 'px', left: menu.x + 'px' }" @click.stop>
+        <button class="ctx-item" @click="setReply(menu.msg)">↩ Відповісти</button>
+      </div>
+
+      <div id="bottom"></div>
     </div>
 
 
     <!-- Message Input -->
     <div class="input-area">
-      <message-input 
-        v-model="messageText"
-        hide-checkbox
-        @send="sendMessage"
+      <message-input
+          v-model="messageText"
+          hide-checkbox
+          :replying-to-message="replyingTo"
+          @send="sendMessage"
+          @cancel-reply="replyingTo = null"
       />
     </div>
+
+    <button v-if="showGoDown" class="goDown" @click="scrollToSection">↓</button>
+
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, computed } from 'vue'
+import {ref, onMounted, computed, watch, nextTick} from 'vue'
 import { useApi } from '~/composables/useApi'
 import { useAuth } from '~/composables/useAuth'
 import { useFilter } from '~/composables/useFilter'
 import MessageInput from '~/components/form/messageInput.vue'
 import ChatMessage from '~/components/chat/message.vue'
+import {useRoute} from "#vue-router";
 
 const { apiFetch } = useApi()
 const { currentUser } = useAuth()
+const route = useRoute()
 
 const messages = ref<any[]>([])
 const pending = ref(false)
@@ -107,7 +121,9 @@ const mappedMessages = computed(() => {
     user_id: msg.user_id,
     created_at: msg.created_at,
     user: msg.user,
-    ticket: msg.ticket
+    ticket: msg.ticket,
+    reply: msg.reply,
+    parent: msg.parent
   }))
 })
 
@@ -128,17 +144,78 @@ onMounted(() => {
   loadMessages()
 })
 
+const messageAreaRef = ref<HTMLElement | null>(null)
+
+const showGoDown = ref(false)
+const NEAR_BOTTOM_PX = 80
+
+function isNearBottom(el: HTMLElement) {
+  return el.scrollHeight - el.scrollTop - el.clientHeight < NEAR_BOTTOM_PX
+}
+
+function handleScroll() {
+  const el = messageAreaRef.value
+  if (!el) return
+  showGoDown.value = !isNearBottom(el)
+}
+
+function scrollToSection() {
+  document.getElementById('bottom')?.scrollIntoView({ behavior: 'smooth' })
+}
+
+
+watch(pending, async (newVal) => {
+  if (newVal) return
+  await nextTick()
+
+  if (route.hash) {
+    const target = document.querySelector(route.hash)
+    if (target) {
+      target.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      target.classList.add('highlight-ticket')
+      setTimeout(() => target.classList.remove('highlight-ticket'), 2000)
+    }
+  } else {
+    document.getElementById('bottom')?.scrollIntoView()
+  }
+
+  handleScroll()
+})
+
+const menu = ref({ show: false, x: 0, y: 0, msg: null as any })
+function openMsgMenu(e: MouseEvent, msg: any) {
+  menu.value = { show: true, x: e.clientX, y: e.clientY, msg }
+  document.addEventListener('click', closeCtxMenu, { once: true })
+}
+function closeCtxMenu() { menu.value.show = false }
+
+const replyingTo = ref<{ id: number; sender: string; text: string } | null>(null)
+function setReply(msg: any) {
+  if (!msg) return
+  replyingTo.value = { id: msg.id, sender: msg.user?.username || 'Support', text: msg.message }
+  closeCtxMenu()
+  document.getElementById('message-f')?.focus()
+}
+
+function scrollToMessage(id: number | null | undefined) {
+  if (!id) return
+  const el = document.getElementById('msg-' + id)
+  if (el) {
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    el.classList.add('highlight-message')
+    setTimeout(() => el.classList.remove('highlight-message'), 2000)
+  }
+}
+
 async function sendMessage() {
   if (!messageText.value.trim()) return
-  
   try {
     await apiFetch('/general-chat/messages', {
       method: 'POST',
-      body: {
-        message: messageText.value
-      }
+      body: { message: messageText.value, parent_id: replyingTo.value?.id ?? null }
     })
     messageText.value = ''
+    replyingTo.value = null
     loadMessages()
   } catch (e: any) {
     alert(e?.data?.detail ?? 'Помилка надсилання повідомлення')
@@ -162,65 +239,70 @@ async function sendMessage() {
   flex-direction: column;
   gap: 12px;
 }
+
+.ctx-menu {
+  position: fixed;
+  background: var(--message-bg-color);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 6px 0;
+  min-width: 140px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+  z-index: 9999;
+}
+.ctx-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 6px 16px;
+  background: none;
+  border: none;
+  color: var(--message-text-color);
+  font-size: 13px;
+  cursor: pointer;
+  transition: background 0.1s;
+}
+.ctx-item:hover {
+  background: var(--nav-item-bg-hover-color);
+}
+.goDown {
+  position: absolute;
+  right: 20px;
+  bottom: 90px;
+  width: 50px;
+  height: 50px;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  background: var(--message-bg-color);
+  color: var(--message-text-color);
+  font-size: 20px;
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.25);
+  z-index: 5;
+}
+.goDown:hover {
+  background: var(--nav-item-bg-hover-color);
+}
 .state-msg {
   text-align: center;
   padding: 20px;
   color: var(--message-time-color);
 }
 .state-msg.error { color: #e05252; }
-.forwarded-card {
-  margin-top: 8px;
-  background: rgba(0, 0, 0, 0.03);
-  border-radius: 8px;
-  border-left: 3px solid rgba(0, 0, 0, 0.2);
-  padding: 12px;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  font-size: 13px;
-  color: var(--message-text-color);
-}
-.message_out .forwarded-card {
-  background: rgba(255, 255, 255, 0.05);
-  border-left-color: rgba(255, 255, 255, 0.3);
-  color: #fff;
-}
-.card-header {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-weight: 600;
-  font-size: 14px;
-}
-.status-badge {
-  margin-left: auto;
-  font-size: 10px;
-  padding: 2px 6px;
-  border-radius: 4px;
-  text-transform: uppercase;
-  background: rgba(0,0,0,0.1);
-  color: inherit;
-}
-.message_out .status-badge {
-  background: rgba(255,255,255,0.15);
-}
-.card-body {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-.info-row {
-  opacity: 0.8;
-}
-.message-excerpt {
+.forwarded-message {
   margin-top: 4px;
-  font-style: italic;
-  opacity: 0.7;
-  padding-left: 8px;
-  border-left: 2px solid rgba(0, 0, 0, 0.15);
+  margin-bottom: 4px;
 }
-.message_out .message-excerpt {
-  border-left-color: rgba(255, 255, 255, 0.2);
+.forward-label {
+  display: block;
+  font-size: 11px;
+  color: var(--accent);
+  margin-bottom: 2px;
+  font-weight: 500;
+  opacity: 0.9;
+}
+.message_out .forward-label {
+  color: #fff;
 }
 .card-actions {
   margin-top: 4px;
@@ -231,10 +313,11 @@ async function sendMessage() {
   display: inline-block;
   background: rgba(0, 0, 0, 0.05);
   color: inherit;
-  padding: 6px 12px;
+  padding: 4px 8px;
   border-radius: 6px;
   text-decoration: none;
   font-weight: 500;
+  font-size: 11px;
   border: 1px solid rgba(0,0,0,0.1);
   transition: all 0.2s;
 }
@@ -252,5 +335,18 @@ async function sendMessage() {
 }
 .input-area {
   flex-shrink: 0;
+}
+
+.reply-quote { border-left: 3px solid var(--accent); padding-left: 8px; margin-top: 4px; font-size: 12px; opacity: 0.85; cursor: pointer; transition: opacity 0.2s; }
+.reply-quote:hover { opacity: 1; }
+.reply-quote-user { display: block; font-weight: 600; color: var(--accent); }
+.reply-quote-text { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 300px; }
+
+.highlight-message {
+  animation: highlight 2s ease-out;
+}
+@keyframes highlight {
+  0% { box-shadow: 0 0 0 4px var(--accent); }
+  100% { box-shadow: 0 0 0 0px transparent; }
 }
 </style>

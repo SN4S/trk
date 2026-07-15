@@ -146,7 +146,7 @@ async def create_general_chat_message(
     user: CurrentUser,
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
-    return await service.create_general_chat_message(db, user.id, data.message)
+    return await service.create_general_chat_message(db, user.id, data.message, data.parent_id)
 
 @router.post("/{ticket_id}/forward", response_model=GeneralChatMessageOut, status_code=status.HTTP_201_CREATED)
 async def forward_ticket_to_general_chat(

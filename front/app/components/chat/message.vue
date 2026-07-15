@@ -3,8 +3,8 @@
     <p class="message_sender">
       {{ displayName }}
     </p>
-    <p class="message_text" v-if="!hideText">{{ message.message }}</p>
     <slot name="extra"></slot>
+    <p class="message_text" v-if="!hideText" v-html="renderedText"></p>
     <span class="message_time">{{ formattedTime }}</span>
   </div>
 </template>
@@ -35,6 +35,23 @@ const formattedTime = computed(() => {
   const s = props.message.created_at
   const d = new Date(s.endsWith('Z') || s.includes('+') ? s : s + 'Z')
   return d.toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit' })
+})
+
+import { useMentionableUsers } from '~/composables/useMentionableUsers'
+const { users: mentionableUsers } = useMentionableUsers()
+
+function escapeHtml(str: string) {
+  return str.replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' } as Record<string,string>)[c])
+}
+
+const renderedText = computed(() => {
+  const escaped = escapeHtml(props.message.message)
+  return escaped.replace(/@\[(\d+):([^\]]+)\]/g, (_m, id: string, storedName: string) => {
+    const uid = Number(id)
+    const live = mentionableUsers.value.find(u => u.id === uid)
+    const display = live?.username ?? storedName
+    return `<span class="mention">@${escapeHtml(display)}</span>`
+  })
 })
 </script>
 
@@ -84,5 +101,7 @@ const formattedTime = computed(() => {
 .message_out .message_time {
   color: var(--second-test-color);
 }
+
+.mention { color: var(--accent); font-weight: 600; }
 
 </style>
