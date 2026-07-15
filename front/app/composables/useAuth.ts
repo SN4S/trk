@@ -15,6 +15,7 @@ interface UserOut{
     role: string,
 }
 
+// Token held only in memory — not localStorage (XSS protection)
 const accessToken = ref<string | null>(null)
 const currentUser = ref<UserOut | null>(null)
 let globalRefreshPromise: Promise<boolean> | null = null
@@ -26,13 +27,14 @@ export function useAuth(){
 
     const isLoggedIn = computed(() => accessToken.value !== null)
 
-    //get token from local storage
+    // Restore session from httpOnly refresh cookie on page load
     async function init () {
         if (!process.client) return
-        const stored = localStorage.getItem('access_token')
-        if (stored) {
-            accessToken.value = stored
-            await fetchMe()
+        if (accessToken.value) return // already initialized
+        const ok = await refresh()
+        if (!ok) {
+            accessToken.value = null
+            currentUser.value = null
         }
     }
 
@@ -46,7 +48,6 @@ export function useAuth(){
         })
 
         accessToken.value = data.access_token
-        if (process.client) localStorage.setItem('access_token', data.access_token)
 
         await fetchMe()
 
@@ -77,7 +78,7 @@ export function useAuth(){
                     credentials: 'include'
                 })
                 accessToken.value = data.access_token
-                if (process.client) localStorage.setItem('access_token', data.access_token)
+                await fetchMe()
                 return true
             } catch {
                 return false
@@ -102,7 +103,6 @@ export function useAuth(){
         }finally {
             accessToken.value = null
             currentUser.value = null
-            if (process.client) localStorage.removeItem('access_token')
             await router.push('/login')
         }
         }

@@ -151,7 +151,15 @@ const error = computed(() => ticketsError.value || repliesError.value)
 watch(pending, async (newVal) => {
   if (newVal) return
   await nextTick()
+  scrollToHash()
+  handleScroll()
+})
 
+watch(() => route.hash, () => {
+  scrollToHash()
+})
+
+function scrollToHash() {
   if (route.hash) {
     const target = document.querySelector(route.hash)
     if (target) {
@@ -162,9 +170,7 @@ watch(pending, async (newVal) => {
   } else {
     document.getElementById('bottom')?.scrollIntoView()
   }
-
-  handleScroll()
-})
+}
 
 // ── Messaging State & Logic ──────────────────────────────────────────────────
 const messageText = ref('')

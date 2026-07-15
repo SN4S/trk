@@ -9,8 +9,7 @@
 
     <!--GROUP LIST START-->
     <div class="list" @click="closeMenu">
-      <sidebar-smallitem v-if="currentUser?.role === 'admin'" to="/admin" icon="⚙️" title="Адмін панель" />
-      <sidebar-group isGlobal="true"/>
+      <sidebar-group :isGlobal="true" :group="generalGroupObj" />
       <!-- Loading -->
       <div v-if="pending" class="state-row">Завантаження…</div>
 
@@ -64,13 +63,83 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import SidebarGroup from "~/components/sidebar/group.vue"
 import { useGroups, type ApiGroup } from "~/composables/useGroups"
 import { useFolders } from "~/composables/useFolders"
+import { useAuth } from "~/composables/useAuth"
+import { useApi } from "~/composables/useApi"
+import { useWebSocket } from "~/composables/useWebSocket"
 
-const { groups: allGroups, pending, error } = useGroups()
+const { currentUser } = useAuth()
+const { groups: allGroups, pending, error, fetchGroups } = useGroups()
 const { store, addGroupToFolder, removeGroupFromFolder } = useFolders()
+const { apiFetch } = useApi()
+
+// ── General Chat Last Message ────────────────────────────────────────────────
+const generalLastMessage = ref<string | null>(null)
+const generalLastTime = ref<Date | null>(null)
+const generalGroupObj = computed(() => ({ 
+  last_message: generalLastMessage.value,
+  last_time: generalLastTime.value 
+} as any))
+
+async function fetchGeneralLatest() {
+  try {
+    const messages = await apiFetch<any[]>('/general-chat/messages')
+    if (messages && messages.length > 0) {
+      const last = messages[messages.length - 1]
+      const author = last.user?.username || 'Support'
+      generalLastMessage.value = `${author}: ${last.message}`
+      generalLastTime.value = new Date(last.created_at)
+    }
+  } catch(e) {}
+}
+
+const { subscribe, unsubscribe } = useWebSocket()
+
+function onNewGeneralMsg(data: any) {
+  const author = data.user?.username || 'Support'
+  generalLastMessage.value = `${author}: ${data.message}`
+  generalLastTime.value = new Date(data.created_at)
+}
+
+function onNewReply(data: any) {
+  const groupId = data.group_id
+  if (!groupId) return
+  const group = allGroups.value.find(g => g.id === groupId)
+  if (group) {
+    // Support reply has user.username; client reply falls back to soc_user_name from the ticket
+    const author = data.user?.username || data.soc_user_name || 'Клієнт'
+    group.last_message = `${author}: ${data.message}`
+    group.last_time = new Date(data.created_at)
+  }
+}
+
+function onNewTicket(data: any) {
+  // Patch the affected group's last_message
+  const groupId = data.group_id
+  if (!groupId) return
+  const group = allGroups.value.find(g => g.id === groupId)
+  if (group) {
+    const author = data.soc_user_name || 'Клієнт'
+    group.last_message = `${author}: ${data.message || ''}`
+    group.last_time = new Date(data.created_at)
+  }
+}
+
+onMounted(() => {
+  fetchGeneralLatest()
+  subscribe('new_general_message', onNewGeneralMsg)
+  subscribe('new_reply', onNewReply)
+  subscribe('new_ticket', onNewTicket)
+})
+
+onUnmounted(() => {
+  unsubscribe('new_general_message', onNewGeneralMsg)
+  unsubscribe('new_reply', onNewReply)
+  unsubscribe('new_ticket', onNewTicket)
+})
 
 // ── Filter groups by active folder ──────────────────────────────────────────
 const visibleGroups = computed(() => {

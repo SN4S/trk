@@ -35,6 +35,7 @@ export interface ApiTicket {
 export function useTickets(groupId?: MaybeRef<number | null>) {
     const { apiFetch } = useApi()
     const { filter } = useFilter()
+    const { subscribe, unsubscribe } = useWebSocket()
 
     const tickets = ref<ApiTicket[]>([])
     const pending = ref(false)
@@ -81,6 +82,20 @@ export function useTickets(groupId?: MaybeRef<number | null>) {
         () => fetchTickets(),
         { immediate: true },
     )
+
+    function onTicketEvent(data: any) {
+        fetchTickets()
+    }
+
+    onMounted(() => {
+        subscribe('new_ticket', onTicketEvent)
+        subscribe('update_ticket', onTicketEvent)
+    })
+
+    onUnmounted(() => {
+        unsubscribe('new_ticket', onTicketEvent)
+        unsubscribe('update_ticket', onTicketEvent)
+    })
 
     return { tickets, pending, error, fetchTickets }
 }

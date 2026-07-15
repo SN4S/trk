@@ -38,7 +38,7 @@ def _set_refresh_cookie(response: Response, token: str) -> None:
 async def register(
     data: RegisterRequest,
     db: Annotated[AsyncSession, Depends(get_db)],
-    _current_user: CurrentUser,
+    _current_user: Annotated[CurrentUser, Depends(RequireRole(["admin"]))],
 ):
     return await service.register_user(db, data.username, data.password, role=data.role)
 

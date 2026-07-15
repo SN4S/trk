@@ -47,6 +47,7 @@
 
 <script setup lang="ts">
 import type { ApiTicket } from '~/composables/useTickets'
+const { currentUser } = useAuth()
 
 const props = defineProps<{
   modelValue: string
@@ -67,7 +68,10 @@ const mentionQuery = computed(() => {
 const filteredUsers = computed(() => {
   if (mentionQuery.value === null) return []
   const q = mentionQuery.value.toLowerCase()
-  return mentionableUsers.value.filter(u => u.username.toLowerCase().startsWith(q)).slice(0, 6)
+  return mentionableUsers.value
+          .filter(u => u.id !== currentUser.value?.id)
+          .filter(u => u.username.toLowerCase().startsWith(q))
+          .slice(0, 6)
 })
 
 const showMentions = computed(() => mentionQuery.value !== null && filteredUsers.value.length > 0)

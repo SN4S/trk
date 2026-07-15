@@ -30,6 +30,15 @@ async def authenticate_user(db: AsyncSession, username: str, password: str) -> U
     if not user.is_active:
         raise InactiveUser()
 
+    # Clean up expired/revoked tokens for this user on login
+    await db.execute(
+        update(RefreshToken).where(
+            RefreshToken.user_id == user.id,
+            (RefreshToken.expires_at < datetime.now(UTC)) | (RefreshToken.revoked == True)
+        ).values(revoked=True)
+    )
+    await db.commit()
+
     return user
 
 

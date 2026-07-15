@@ -13,7 +13,7 @@ class TicketCreate(BaseModel):
     theme_id: int
     group_id: int
     soc_user_id: int
-    soc_user_name: str
+    soc_user_name: str = Field(min_length=1, max_length=255)
     message: str | None = Field(default=None, max_length=4000)
 
 

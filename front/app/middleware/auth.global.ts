@@ -1,11 +1,9 @@
+// auth middleware
+export default defineNuxtRouteMiddleware(async (to) => {
+    const { isLoggedIn, init } = useAuth()
 
-
-//auth middleware
-
-export default defineNuxtRouteMiddleware((to)=>{
-    const {isLoggedIn , init} = useAuth()
-
-    init()
+    // Await init so the refresh-cookie restore completes before route guard runs
+    await init()
 
     const isPublic = to.path === '/login'
 

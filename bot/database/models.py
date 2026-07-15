@@ -58,6 +58,14 @@ class Reply(Base):
     ticket: Mapped["Ticket"] = relationship(back_populates="replies")
     user: Mapped["User"] = relationship()
 
+class TicketAssignment(Base):
+    __tablename__ = "ticket_assignment"
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    ticket_id: Mapped[int] = mapped_column(ForeignKey("ticket.id", ondelete="CASCADE"), nullable=False)
+    assigned_to_id: Mapped[int] = mapped_column(ForeignKey("user.id"), nullable=True)
+    assigned_by_id: Mapped[int] = mapped_column(ForeignKey("user.id"), nullable=False)
+    assigned_at: Mapped["DateTime"] = mapped_column(DateTime, server_default=func.now())
+
 class Folder(Base):
     __tablename__ = "folder"
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)

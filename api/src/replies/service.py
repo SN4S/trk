@@ -7,6 +7,9 @@ from src.tickets.models import TicketAssignment
 import logging
 import httpx
 from src.config import settings
+from src.websockets.manager import manager
+from src.replies.schemas import ReplyOut
+from src.tickets.models import Ticket
 
 logger = logging.getLogger(__name__)
 
@@ -101,7 +104,32 @@ async def create(
     )
     db.add(reply)
     await db.commit()
-    return await get_by_id(db, reply.id)
+    created_reply = await get_by_id(db, reply.id)
+    
+    latest_assignment = await db.execute(
+        select(TicketAssignment)
+        .where(TicketAssignment.ticket_id == ticket_id)
+        .order_by(TicketAssignment.id.desc())
+        .limit(1)
+    )
+    assignment = latest_assignment.scalar_one_or_none()
+    assignee_id = assignment.assigned_to_id if assignment else None
+
+    # Fetch group_id and soc_user_name for sidebar last-message update
+    ticket_row = await db.execute(
+        select(Ticket.group_id, Ticket.soc_user_name).where(Ticket.id == ticket_id)
+    )
+    ticket_info = ticket_row.first()
+    group_id = ticket_info.group_id if ticket_info else None
+    soc_user_name = ticket_info.soc_user_name if ticket_info else None
+
+    data = ReplyOut.model_validate(created_reply).model_dump(mode="json")
+    data["ticket_assigned_to_id"] = assignee_id
+    data["group_id"] = group_id
+    data["soc_user_name"] = soc_user_name
+
+    await manager.broadcast({"type": "new_reply", "data": data})
+    return created_reply
 
 
 async def delete(db: AsyncSession, reply: Reply) -> None:

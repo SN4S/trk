@@ -64,6 +64,7 @@ onUnmounted(() => {
 
 .userImg {
   height: 35px;
+  width: 35px;
   border-radius: var(--radius);
 }
 

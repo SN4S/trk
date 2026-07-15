@@ -76,6 +76,7 @@ defineExpose({ focus: () => selectRef.value?.focus() })
 }
 .custom-select {
   box-sizing: border-box;
+  width: 100%;
   height: 28px;
   padding: 0 8px;
   font-size: 12px;
@@ -87,6 +88,9 @@ defineExpose({ focus: () => selectRef.value?.focus() })
   cursor: pointer;
   outline: none;
   transition: box-shadow 0.2s;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  overflow: hidden;
 }
 .custom-select:focus {
   border-color: var(--accent);

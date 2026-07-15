@@ -36,7 +36,7 @@
           <div v-if="msg.reply" class="forwarded-message">
             <span class="forward-label">↪ Переслано з тікету #{{ msg.ticket?.ticket_num }}</span>
             <div class="reply-quote">
-              <span class="reply-quote-user">{{ msg.reply.user?.username || 'Support' }}</span>
+              <span class="reply-quote-user">{{ msg.reply.user?.username || (msg.ticket?.soc_user_name || 'Support')}}</span>
               <span class="reply-quote-text">{{ msg.reply.message }}</span>
             </div>
             <div class="card-actions">
@@ -80,6 +80,7 @@ import { useFilter } from '~/composables/useFilter'
 import MessageInput from '~/components/form/messageInput.vue'
 import ChatMessage from '~/components/chat/message.vue'
 import {useRoute} from "#vue-router";
+import { useWebSocket } from '~/composables/useWebSocket'
 
 const { apiFetch } = useApi()
 const { currentUser } = useAuth()
@@ -113,6 +114,8 @@ const mappedMessages = computed(() => {
     })
   }
 
+  console.log(messages.value)
+
   return list.map(msg => ({
     id: msg.id,
     ticket_id: msg.ticket_id,
@@ -140,8 +143,25 @@ async function loadMessages() {
   }
 }
 
+const { subscribe, unsubscribe } = useWebSocket()
+
+function onNewGeneralMessage(data: any) {
+  // If we already have it (e.g. we sent it), ignore
+  if (!messages.value.find(m => m.id === data.id)) {
+    messages.value.push(data)
+    nextTick(() => {
+      document.getElementById('bottom')?.scrollIntoView({ behavior: 'smooth' })
+    })
+  }
+}
+
 onMounted(() => {
   loadMessages()
+  subscribe('new_general_message', onNewGeneralMessage)
+})
+
+onUnmounted(() => {
+  unsubscribe('new_general_message', onNewGeneralMessage)
 })
 
 const messageAreaRef = ref<HTMLElement | null>(null)
@@ -167,7 +187,15 @@ function scrollToSection() {
 watch(pending, async (newVal) => {
   if (newVal) return
   await nextTick()
+  scrollToHash()
+  handleScroll()
+})
 
+watch(() => route.hash, () => {
+  scrollToHash()
+})
+
+function scrollToHash() {
   if (route.hash) {
     const target = document.querySelector(route.hash)
     if (target) {
@@ -178,9 +206,7 @@ watch(pending, async (newVal) => {
   } else {
     document.getElementById('bottom')?.scrollIntoView()
   }
-
-  handleScroll()
-})
+}
 
 const menu = ref({ show: false, x: 0, y: 0, msg: null as any })
 function openMsgMenu(e: MouseEvent, msg: any) {
@@ -339,6 +365,7 @@ async function sendMessage() {
 
 .reply-quote { border-left: 3px solid var(--accent); padding-left: 8px; margin-top: 4px; font-size: 12px; opacity: 0.85; cursor: pointer; transition: opacity 0.2s; }
 .reply-quote:hover { opacity: 1; }
+.message_out .reply-quote-user { display: block; font-weight: 600; color: white; }
 .reply-quote-user { display: block; font-weight: 600; color: var(--accent); }
 .reply-quote-text { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 300px; }
 

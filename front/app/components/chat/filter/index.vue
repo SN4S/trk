@@ -70,8 +70,11 @@ onMounted(fetchThemes)
 .filters {
   display: flex;
   gap: 0.5rem;
-  flex: 1 1 auto;
   flex-direction: row;
+}
+.filters > * {
+  flex: 1 1 0;
+  min-width: 0;
 }
 
 .status-pill {
@@ -82,6 +85,9 @@ onMounted(fetchThemes)
   font-size: 12px;
   line-height: 26px;
   border-radius: var(--radius);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .status-pill {
@@ -112,9 +118,4 @@ onMounted(fetchThemes)
   opacity: 1;
   color: #e05252;
 }
-
-/* Fade transition */
-.fade-enter-active, .fade-leave-active { transition: opacity 0.2s; }
-.fade-enter-from, .fade-leave-to { opacity: 0; }
-
 </style>

@@ -7,9 +7,10 @@
       <div class="info">
         <div class="top_row">
           <div class="group-title">{{ isGlobal ? 'Головний чат' : group?.name }}</div>
+          <div class="last_msg_date">{{ formattedLastTime }}</div>
         </div>
         <div class="last-message muted">
-          {{ isGlobal ? 'General group' : (group?.tg_group_id ? `TG: ${group.tg_group_id}` : 'Telegram group') }}
+          {{ isGlobal ? (group?.last_message || 'General group') : (group?.last_message ? group.last_message : (group?.tg_group_id ? `TG: ${group.tg_group_id}` : 'Telegram group')) }}
         </div>
       </div>
     </div>
@@ -36,6 +37,22 @@ const emit = defineEmits<{
 const isActive = computed(() =>
     props.isGlobal ? route.path.startsWith('/general') : route.path === `/group/${props.group?.id}`
 )
+
+const formattedLastTime = computed(() => {
+  if (!props.group?.last_time) return ''
+  const date = new Date(props.group.last_time)
+  const now = new Date()
+  
+  const isToday = date.getDate() === now.getDate() && 
+                  date.getMonth() === now.getMonth() && 
+                  date.getFullYear() === now.getFullYear()
+                  
+  if (isToday) {
+    return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+  } else {
+    return date.toLocaleDateString([], { day: '2-digit', month: '2-digit', year: '2-digit' })
+  }
+})
 </script>
 
 <style scoped>

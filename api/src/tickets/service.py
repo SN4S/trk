@@ -8,6 +8,8 @@ from src.replies.models import Reply
 
 import re
 from src.auth.models import User
+from src.websockets.manager import manager
+from src.tickets.schemas import TicketOut, GeneralChatMessageOut
 
 MENTION_TOKEN = re.compile(r'@\[(\d+):([^\]]+)\]')
 RAW_MENTION = re.compile(r'@(\w+)')
@@ -119,7 +121,9 @@ async def create(
     )
     db.add(ticket)
     await db.commit()
-    return await get_by_id(db, ticket.id)
+    created_ticket = await get_by_id(db, ticket.id)
+    await manager.broadcast({"type": "new_ticket", "data": TicketOut.model_validate(created_ticket).model_dump(mode="json")})
+    return created_ticket
 
 
 async def update(db: AsyncSession, ticket: Ticket, data: dict) -> Ticket:
@@ -127,7 +131,9 @@ async def update(db: AsyncSession, ticket: Ticket, data: dict) -> Ticket:
         if value is not None:
             setattr(ticket, field, value)
     await db.commit()
-    return await get_by_id(db, ticket.id)
+    updated_ticket = await get_by_id(db, ticket.id)
+    await manager.broadcast({"type": "update_ticket", "data": TicketOut.model_validate(updated_ticket).model_dump(mode="json")})
+    return updated_ticket
 
 async def assign(
     db: AsyncSession,
@@ -171,7 +177,9 @@ async def forward_to_general_chat(db: AsyncSession, ticket_id: int, user_id: int
     chat_message = GeneralChatMessage(ticket_id=ticket_id, user_id=user_id, message=message)
     db.add(chat_message)
     await db.commit()
-    return await _get_general_chat_message(db, chat_message.id)
+    msg = await _get_general_chat_message(db, chat_message.id)
+    await manager.broadcast({"type": "new_general_message", "data": GeneralChatMessageOut.model_validate(msg).model_dump(mode="json")})
+    return msg
 
 async def _encode_mentions(db: AsyncSession, message: str) -> str:
     names = set(RAW_MENTION.findall(message))
@@ -193,14 +201,18 @@ async def create_general_chat_message(db: AsyncSession, user_id: int, message: s
     chat_message = GeneralChatMessage(user_id=user_id, message=message, parent_id=parent_id)
     db.add(chat_message)
     await db.commit()
-    return await _get_general_chat_message(db, chat_message.id)
+    msg = await _get_general_chat_message(db, chat_message.id)
+    await manager.broadcast({"type": "new_general_message", "data": GeneralChatMessageOut.model_validate(msg).model_dump(mode="json")})
+    return msg
 
 
 async def forward_reply_to_general_chat(db: AsyncSession, ticket_id: int, reply_id: int, user_id: int, message: str) -> GeneralChatMessage:
     chat_message = GeneralChatMessage(ticket_id=ticket_id, reply_id=reply_id, user_id=user_id, message=message)
     db.add(chat_message)
     await db.commit()
-    return await _get_general_chat_message(db, chat_message.id)
+    msg = await _get_general_chat_message(db, chat_message.id)
+    await manager.broadcast({"type": "new_general_message", "data": GeneralChatMessageOut.model_validate(msg).model_dump(mode="json")})
+    return msg
 
 
 async def _get_general_chat_message(db: AsyncSession, message_id: int) -> GeneralChatMessage:

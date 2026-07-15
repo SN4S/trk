@@ -1,0 +1,59 @@
+import logging
+import os
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Depends, Query, Header, HTTPException
+from sqlalchemy.ext.asyncio import AsyncSession
+from src.auth.dependencies import parse_jwt_data, get_current_user
+from src.database import get_db
+from src.websockets.manager import manager
+
+from pydantic import BaseModel
+
+logger = logging.getLogger(__name__)
+
+INTERNAL_SECRET = os.getenv("INTERNAL_API_SECRET", "")
+
+
+class BroadcastEvent(BaseModel):
+    type: str
+    data: dict
+
+
+def verify_internal_secret(x_internal_secret: str = Header(..., alias="X-Internal-Secret")) -> None:
+    if not INTERNAL_SECRET or x_internal_secret != INTERNAL_SECRET:
+        raise HTTPException(status_code=403, detail="Forbidden")
+
+
+router = APIRouter(
+    prefix="/ws",
+    tags=["websockets"]
+)
+
+
+@router.post("/broadcast", dependencies=[Depends(verify_internal_secret)])
+async def broadcast_event(event: BroadcastEvent):
+    await manager.broadcast({"type": event.type, "data": event.data})
+    return {"status": "ok"}
+
+
+@router.websocket("/updates")
+async def websocket_updates(
+    websocket: WebSocket,
+    token: str = Query(..., description="JWT Access Token"),
+    db: AsyncSession = Depends(get_db)
+):
+    try:
+        token_data = await parse_jwt_data(token)
+        user = await get_current_user(token_data, db)
+        logger.info("WS Auth Success: %s", user.username)
+    except Exception as e:
+        logger.warning("WS Auth Failed: %s", e)
+        await websocket.close(code=1008, reason="Invalid authentication credentials")
+        return
+
+    await manager.connect(websocket)
+    logger.debug("WS Connected. Active connections: %d", len(manager.active_connections))
+    try:
+        while True:
+            _ = await websocket.receive_text()
+    except WebSocketDisconnect:
+        manager.disconnect(websocket)

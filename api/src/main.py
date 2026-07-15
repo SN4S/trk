@@ -11,6 +11,7 @@ from src.replies.router import router as reply_router
 from src.themes.router import router as theme_router
 from src.misc.router import router as misc_router
 from src.tickets.router import general_chat_router
+from src.websockets.router import router as websocket_router
 
 app = FastAPI(
     title="XproSupport API",
@@ -36,6 +37,7 @@ app.include_router(reply_router)
 app.include_router(theme_router)
 app.include_router(misc_router)
 app.include_router(general_chat_router)
+app.include_router(websocket_router)
 
 
 @app.get("/", tags=["health"])

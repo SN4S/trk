@@ -144,16 +144,24 @@ const route = useRoute()
 watch(pending, async (newVal) => {
   if (!newVal) {
     await nextTick()
-    if (route.hash) {
-      const el = document.querySelector(route.hash)
-      if (el) {
-        el.scrollIntoView({ behavior: 'smooth', block: 'center' })
-        el.classList.add('highlight-ticket')
-        setTimeout(() => el.classList.remove('highlight-ticket'), 2000)
-      }
-    }
+    scrollToHash()
   }
 })
+
+watch(() => route.hash, () => {
+  scrollToHash()
+})
+
+function scrollToHash() {
+  if (route.hash) {
+    const el = document.querySelector(route.hash)
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      el.classList.add('highlight-ticket')
+      setTimeout(() => el.classList.remove('highlight-ticket'), 2000)
+    }
+  }
+}
 
 // ── Messaging State & Logic ──────────────────────────────────────────────────
 const messageText = ref('')

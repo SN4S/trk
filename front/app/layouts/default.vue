@@ -14,11 +14,13 @@
       <slot />
     </div>
     <!-- / Body -->
+    <UiToastContainer />
   </div>
 </template>
 
 <script setup>
 
+import UiToastContainer from '~/components/ui/ToastContainer.vue'
 const MIN_WIDTH_PCT = 14
 const MAX_WIDTH_PCT = 40
 
@@ -66,7 +68,7 @@ onMounted(() => {
 .sidebar_block {
   height: 100vh;
   flex-shrink: 0;
-  border-right: 1px solid var(--border-color);
+  border-right: var(--border);
   position: relative;
   overflow: hidden;
 }
@@ -83,7 +85,7 @@ onMounted(() => {
 
 .resize_handle:hover,
 .resize_handle:active {
-  background: var(--border-color);
+  background: var(--border);
 }
 
 .body_block {

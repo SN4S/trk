@@ -40,15 +40,11 @@ services:
     restart: unless-stopped
     ports:
       - "8000:8000"
+    env_file:
+      - ./api/.env
     environment:
+      # Override DB URL to use the internal Docker network hostname
       - DATABASE_URL=mysql+aiomysql://root:rootpassword@db:3306/xpro_support_db
-      - AUTH_JWT_SECRET=your-secret-key-here
-      - AUTH_JWT_ALG=HS256
-      - AUTH_JWT_EXP_MINUTES=15
-      - AUTH_REFRESH_TOKEN_KEY=your-secret-secret-key-here
-      - AUTH_REFRESH_TOKEN_EXP=30d
-      - AUTH_SECURE_COOKIES=false
-      - TG_BOT_TOKEN=/
       - CORS_ORIGINS=http://localhost:3000
     depends_on:
       db:
@@ -60,9 +56,12 @@ services:
       dockerfile: Dockerfile
     container_name: xpro_bot
     restart: unless-stopped
+    env_file:
+      - ./bot/.env
     environment:
-      - TG_BOT_TOKEN=/
+      # Override to use internal Docker network hostname
       - DATABASE_URL=mysql+aiomysql://root:rootpassword@db:3306/xpro_support_db
+      - API_URL=http://api:8000
     depends_on:
       db:
         condition: service_healthy

@@ -56,9 +56,6 @@ async def create_reply(
         user_id=user.id,
     )
 
-    print(data.message)
-    print(data.is_support)
-
     if data.is_support:
         await notify_client_reply(ticket, user, data.message, data.requires_client_reply)
     return reply

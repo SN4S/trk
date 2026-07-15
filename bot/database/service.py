@@ -1,6 +1,24 @@
 from sqlalchemy import select, desc, func, case
 from database import models
 from database.models import Theme, Ticket, Reply, Group, User
+import asyncio
+import httpx
+import os
+
+INTERNAL_SECRET = os.getenv("INTERNAL_API_SECRET", "")
+
+async def notify_api(event_type: str, data: dict):
+    api_url = os.getenv("API_URL", "http://localhost:8000")
+    try:
+        async with httpx.AsyncClient() as client:
+            await client.post(
+                f"{api_url}/ws/broadcast",
+                json={"type": event_type, "data": data},
+                headers={"X-Internal-Secret": INTERNAL_SECRET},
+                timeout=2.0
+            )
+    except Exception as e:
+        print("Failed to notify API:", e)
 
 
 async def get_themes() -> list[Theme]:
@@ -43,6 +61,7 @@ async def finalize_ticket(ticket_id: int, message: str) -> Ticket:
             ticket.message = message
             await session.commit()
             await session.refresh(ticket)
+            asyncio.create_task(notify_api("new_ticket", {"id": ticket.id}))
         return ticket
 
 async def delete_ticket(ticket_id: int):
@@ -51,6 +70,7 @@ async def delete_ticket(ticket_id: int):
         if ticket:
             await session.delete(ticket)
             await session.commit()
+            asyncio.create_task(notify_api("update_ticket", {"id": ticket_id}))
 
 async def get_theme_name(theme_id: int) -> str | None:
     async with models.async_session() as session:
@@ -70,6 +90,36 @@ async def add_reply(ticket_id: int, message: str, is_support: bool, user_id: int
             if user:
                 admin_name = user.username
                 
+        from database.models import TicketAssignment
+        latest_assignment = await session.execute(
+            select(TicketAssignment)
+            .where(TicketAssignment.ticket_id == ticket_id)
+            .order_by(TicketAssignment.id.desc())
+            .limit(1)
+        )
+        assignment = latest_assignment.scalar_one_or_none()
+        assignee_id = assignment.assigned_to_id if assignment else None
+
+        # Fetch group_id and soc_user_name for sidebar update
+        ticket_obj = await session.get(Ticket, ticket_id)
+        group_id = ticket_obj.group_id if ticket_obj else None
+        soc_user_name = ticket_obj.soc_user_name if ticket_obj else None
+
+        data = {
+            "id": reply.id,
+            "ticket_id": ticket_id,
+            "message": reply.message,
+            "is_support": reply.is_support,
+            "user_id": reply.user_id,
+            "created_at": reply.created_at.isoformat() if reply.created_at else None,
+            "ticket_assigned_to_id": assignee_id,
+            "group_id": group_id,
+            "soc_user_name": soc_user_name,
+        }
+        if admin_name:
+            data["user"] = {"id": user_id, "username": admin_name}
+
+        asyncio.create_task(notify_api("new_reply", data))
         return {"id": reply.id, "message": reply.message, "is_support": reply.is_support,
                 "admin_name": admin_name, "created_at": reply.created_at}
 
@@ -190,6 +240,7 @@ async def update_ticket_status(ticket_id: int, status: str) -> dict | None:
             return None
         ticket.status = status
         await session.commit()
+    asyncio.create_task(notify_api("update_ticket", {"id": ticket_id}))
     return await get_ticket(ticket_id)
 
 async def create_theme(name: str) -> Theme:

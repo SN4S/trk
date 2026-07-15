@@ -2,6 +2,8 @@ export interface ApiGroup {
     id: number
     name: string
     tg_group_id: number | null
+    last_message?: string | null
+    last_time?: Date | null
 }
 
 export function useGroups() {

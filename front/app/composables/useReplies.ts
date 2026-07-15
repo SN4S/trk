@@ -16,6 +16,7 @@ export interface ApiReply {
 export function useRepliesT(ticketId?: MaybeRef<number | null>) {
     const { apiFetch } = useApi()
     const { filter } = useFilter()
+    const { subscribe, unsubscribe } = useWebSocket()
 
     const replies = ref<ApiReply[]>([])
     const pending = ref(false)
@@ -61,12 +62,23 @@ export function useRepliesT(ticketId?: MaybeRef<number | null>) {
         { immediate: true },
     )
 
+    function onNewReply(data: any) {
+        // Only fetch if the reply belongs to this ticket
+        if (data.ticket_id === toValue(ticketId)) {
+            fetchReplies()
+        }
+    }
+
+    onMounted(() => subscribe('new_reply', onNewReply))
+    onUnmounted(() => unsubscribe('new_reply', onNewReply))
+
     return { replies, pending, error, fetchReplies }
 }
 
 export function useRepliesG(groupId?: MaybeRef<number | null>) {
     const { apiFetch } = useApi()
     const { filter } = useFilter()
+    const { subscribe, unsubscribe } = useWebSocket()
 
     const replies = ref<ApiReply[]>([])
     const pending = ref(false)
@@ -115,6 +127,14 @@ export function useRepliesG(groupId?: MaybeRef<number | null>) {
         () => fetchReplies(),
         { immediate: true },
     )
+
+    function onNewReply(data: any) {
+        // Refetch regardless, let the backend filter by group
+        fetchReplies()
+    }
+
+    onMounted(() => subscribe('new_reply', onNewReply))
+    onUnmounted(() => unsubscribe('new_reply', onNewReply))
 
     return { replies, pending, error, fetchReplies }
 }

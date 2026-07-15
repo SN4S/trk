@@ -88,8 +88,6 @@ async def update_ticket(
         raise TicketNotFound()
     return await service.update(db, ticket, data.model_dump(exclude_none=True))
 
-from src.auth.dependencies import RequireRole
-
 @router.patch("/{ticket_id}/assign", response_model=TicketOut)
 async def assign_ticket(
     ticket_id: int,

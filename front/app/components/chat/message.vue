@@ -102,6 +102,15 @@ const renderedText = computed(() => {
   color: var(--second-test-color);
 }
 
-.mention { color: var(--accent); font-weight: 600; }
-
+:deep(.mention) {
+ background: rgba(22, 138, 205, 0.15);
+ color: var(--accent);
+ font-weight: 600;
+ padding: 1px 6px;
+ border-radius: 10px;
+}
+.message_out :deep(.mention) {
+  background: rgba(255, 255, 255, 0.2);
+  color: #fff;
+}
 </style>
