@@ -5,3 +5,4 @@ python-telegram-bot~=22.8
 SQLAlchemy~=2.0.51
 pydantic~=2.13.4
 cryptography
+python-telegram-bot[job-queue]

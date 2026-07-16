@@ -11,13 +11,14 @@
     <!-- / END Filter Strip -->
     <!-- Start Dashboard -->
     <div class="dashboard_block">
-      <dashboard-ticket title="Загальна кількість" :data="stats?.all ?? 0" color="red" />
+      <dashboard-ticket title="Всього:" :data="stats?.all ?? 0" color="red" />
       <dashboard-ticket title="Не опрацьовані" :data="stats?.open ?? 0" color="blue" />
       <dashboard-ticket title="В роботі" :data="stats?.pending ?? 0" color="green" />
       <dashboard-ticket title="Завершені" :data="stats?.closed ?? 0" color="#9ec087" />
     </div>
     <!-- / Dashboard -->
-    <user/>
+      <userNotifications />
+      <user/>
     </div>
   </div>
 </template>
@@ -52,6 +53,7 @@ const { stats } = useTicketStats(groupId)
   display: grid;
   grid-template-columns: repeat(4, 1fr);
   gap: 0.5rem;
+  margin: 0.5rem 0rem;
 }
 
 .folders_block {

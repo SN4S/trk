@@ -14,7 +14,7 @@ const toasts = ref<ToastOptions[]>([])
 export function useToast() {
   function addToast(options: ToastOptions) {
     const id = options.id || Math.random().toString(36).substring(2, 9)
-    const duration = options.duration ?? 5000
+    const duration = options.duration ?? 20000
     
     const toast = { ...options, id, type: options.type || 'info' }
     toasts.value.push(toast)

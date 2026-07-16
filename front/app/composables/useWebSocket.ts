@@ -33,6 +33,13 @@ export function useWebSocket() {
                 const type = payload.type
                 const data = payload.data
 
+                if (type === 'notification_event') {
+                    if (listeners['notification']) {
+                        listeners['notification'].forEach(cb => cb(data))
+                    }
+                    return
+                }
+
                 if (listeners[type]) {
                     listeners[type].forEach(cb => cb(data))
                 }

@@ -30,8 +30,24 @@ router = APIRouter(
 
 
 @router.post("/broadcast", dependencies=[Depends(verify_internal_secret)])
-async def broadcast_event(event: BroadcastEvent):
-    await manager.broadcast({"type": event.type, "data": event.data})
+async def broadcast_event(event: BroadcastEvent, db: AsyncSession = Depends(get_db)):
+    from src.notifications.service import broadcast_event as service_broadcast, notify_users
+    from src.auth.models import User
+    from sqlalchemy import select
+    
+    await service_broadcast(type=event.type, data=event.data)
+    
+    if event.type == "new_ticket":
+        admins_managers_query = select(User.id).where(User.role.in_(["admin", "manager"]), User.is_active == True)
+        result = await db.execute(admins_managers_query)
+        admin_manager_ids = result.scalars().all()
+        await notify_users(db, "new_ticket", event.data, user_ids=list(admin_manager_ids))
+        
+    elif event.type == "new_reply":
+        assignee_id = event.data.get("ticket_assigned_to_id")
+        if assignee_id:
+            await notify_users(db, "new_reply", event.data, user_ids=[assignee_id])
+            
     return {"status": "ok"}
 
 
@@ -50,10 +66,10 @@ async def websocket_updates(
         await websocket.close(code=1008, reason="Invalid authentication credentials")
         return
 
-    await manager.connect(websocket)
-    logger.debug("WS Connected. Active connections: %d", len(manager.active_connections))
+    await manager.connect(websocket, user.id)
+    logger.debug("WS Connected. Active connections: %d", sum(len(conns) for conns in manager.active_connections.values()))
     try:
         while True:
             _ = await websocket.receive_text()
     except WebSocketDisconnect:
-        manager.disconnect(websocket)
+        manager.disconnect(websocket, user.id)

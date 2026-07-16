@@ -1,20 +1,20 @@
 from sqlalchemy import select, desc, func, case
+from sqlalchemy.orm import selectinload
 from database import models
-from database.models import Theme, Ticket, Reply, Group, User
+from database.models import Theme, Ticket, Reply, Group, User, TicketAssignment
 import asyncio
 import httpx
 import os
 
-INTERNAL_SECRET = os.getenv("INTERNAL_API_SECRET", "")
-
 async def notify_api(event_type: str, data: dict):
+    secret = os.getenv("INTERNAL_API_SECRET", "")
     api_url = os.getenv("API_URL", "http://localhost:8000")
     try:
         async with httpx.AsyncClient() as client:
             await client.post(
                 f"{api_url}/ws/broadcast",
                 json={"type": event_type, "data": data},
-                headers={"X-Internal-Secret": INTERNAL_SECRET},
+                headers={"X-Internal-Secret": secret},
                 timeout=2.0
             )
     except Exception as e:
@@ -61,7 +61,16 @@ async def finalize_ticket(ticket_id: int, message: str) -> Ticket:
             ticket.message = message
             await session.commit()
             await session.refresh(ticket)
-            asyncio.create_task(notify_api("new_ticket", {"id": ticket.id}))
+            asyncio.create_task(notify_api("new_ticket", {
+                "id": ticket.id,
+                "group_id": ticket.group_id,
+                "soc_user_name": ticket.soc_user_name,
+                "message": ticket.message,
+                "created_at": ticket.created_at.isoformat() if ticket.created_at else None,
+                "ticket_num": ticket.ticket_num,
+                "theme_id": ticket.theme_id,
+                "status": ticket.status.value if hasattr(ticket.status, "value") else ticket.status,
+            }))
         return ticket
 
 async def delete_ticket(ticket_id: int):
@@ -90,7 +99,6 @@ async def add_reply(ticket_id: int, message: str, is_support: bool, user_id: int
             if user:
                 admin_name = user.username
                 
-        from database.models import TicketAssignment
         latest_assignment = await session.execute(
             select(TicketAssignment)
             .where(TicketAssignment.ticket_id == ticket_id)
@@ -137,8 +145,6 @@ async def get_replies(ticket_id: int) -> list[dict]:
              "admin_name": admin_name, "created_at": r.created_at}
             for r, admin_name in result
         ]
-
-from sqlalchemy.orm import selectinload
 
 async def get_ticket_by_num(ticket_num: str) -> Ticket | None:
     async with models.async_session() as session:
@@ -240,7 +246,8 @@ async def update_ticket_status(ticket_id: int, status: str) -> dict | None:
             return None
         ticket.status = status
         await session.commit()
-    asyncio.create_task(notify_api("update_ticket", {"id": ticket_id}))
+    # await directly — session is closed, no DB dependency
+    await notify_api("update_ticket", {"id": ticket_id})
     return await get_ticket(ticket_id)
 
 async def create_theme(name: str) -> Theme:

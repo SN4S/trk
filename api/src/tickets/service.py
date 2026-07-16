@@ -8,7 +8,7 @@ from src.replies.models import Reply
 
 import re
 from src.auth.models import User
-from src.websockets.manager import manager
+from src.notifications.service import broadcast_event, notify_users
 from src.tickets.schemas import TicketOut, GeneralChatMessageOut
 
 MENTION_TOKEN = re.compile(r'@\[(\d+):([^\]]+)\]')
@@ -122,7 +122,15 @@ async def create(
     db.add(ticket)
     await db.commit()
     created_ticket = await get_by_id(db, ticket.id)
-    await manager.broadcast({"type": "new_ticket", "data": TicketOut.model_validate(created_ticket).model_dump(mode="json")})
+    data = TicketOut.model_validate(created_ticket).model_dump(mode="json")
+    await broadcast_event("new_ticket", data)
+    
+    # Notify admins and managers
+    admins_managers_query = select(User.id).where(User.role.in_(["admin", "manager"]), User.is_active == True)
+    result = await db.execute(admins_managers_query)
+    admin_manager_ids = result.scalars().all()
+    await notify_users(db, "new_ticket", data, user_ids=list(admin_manager_ids))
+    
     return created_ticket
 
 
@@ -132,7 +140,7 @@ async def update(db: AsyncSession, ticket: Ticket, data: dict) -> Ticket:
             setattr(ticket, field, value)
     await db.commit()
     updated_ticket = await get_by_id(db, ticket.id)
-    await manager.broadcast({"type": "update_ticket", "data": TicketOut.model_validate(updated_ticket).model_dump(mode="json")})
+    await broadcast_event("update_ticket", TicketOut.model_validate(updated_ticket).model_dump(mode="json"))
     return updated_ticket
 
 async def assign(
@@ -149,7 +157,15 @@ async def assign(
     )
     db.add(record)
     await db.commit()
-    return await get_by_id(db, ticket.id)
+    assigned_ticket = await get_by_id(db, ticket.id)
+    
+    data = TicketOut.model_validate(assigned_ticket).model_dump(mode="json")
+    await broadcast_event("update_ticket", data)
+    
+    if user_id:
+        await notify_users(db, "assign_ticket", data, user_ids=[user_id])
+        
+    return assigned_ticket
 
 
 async def get_assignment_history(
@@ -178,13 +194,14 @@ async def forward_to_general_chat(db: AsyncSession, ticket_id: int, user_id: int
     db.add(chat_message)
     await db.commit()
     msg = await _get_general_chat_message(db, chat_message.id)
-    await manager.broadcast({"type": "new_general_message", "data": GeneralChatMessageOut.model_validate(msg).model_dump(mode="json")})
+    data = GeneralChatMessageOut.model_validate(msg).model_dump(mode="json")
+    await broadcast_event("new_general_message", data)
     return msg
 
-async def _encode_mentions(db: AsyncSession, message: str) -> str:
+async def _encode_mentions(db: AsyncSession, message: str) -> tuple[str, list[int]]:
     names = set(RAW_MENTION.findall(message))
     if not names:
-        return message
+        return message, []
     result = await db.execute(select(User).where(User.username.in_(names)))
     lookup = {u.username: u.id for u in result.scalars()}
 
@@ -193,16 +210,26 @@ async def _encode_mentions(db: AsyncSession, message: str) -> str:
         uid = lookup.get(uname)
         return f"@[{uid}:{uname}]" if uid else m.group(0)
 
-    return RAW_MENTION.sub(repl, message)
+    return RAW_MENTION.sub(repl, message), list(lookup.values())
 
 
 async def create_general_chat_message(db: AsyncSession, user_id: int, message: str, parent_id: int | None = None) -> GeneralChatMessage:
-    message = await _encode_mentions(db, message)
+    message, mentioned_ids = await _encode_mentions(db, message)
     chat_message = GeneralChatMessage(user_id=user_id, message=message, parent_id=parent_id)
     db.add(chat_message)
     await db.commit()
     msg = await _get_general_chat_message(db, chat_message.id)
-    await manager.broadcast({"type": "new_general_message", "data": GeneralChatMessageOut.model_validate(msg).model_dump(mode="json")})
+    
+    data = GeneralChatMessageOut.model_validate(msg).model_dump(mode="json")
+    await broadcast_event("new_general_message", data)
+    
+    notify_ids = set(mentioned_ids)
+    if msg.parent and msg.parent.user_id != user_id:
+        notify_ids.add(msg.parent.user_id)
+        
+    if notify_ids:
+        await notify_users(db, "new_general_message", data, user_ids=list(notify_ids))
+        
     return msg
 
 
@@ -211,7 +238,8 @@ async def forward_reply_to_general_chat(db: AsyncSession, ticket_id: int, reply_
     db.add(chat_message)
     await db.commit()
     msg = await _get_general_chat_message(db, chat_message.id)
-    await manager.broadcast({"type": "new_general_message", "data": GeneralChatMessageOut.model_validate(msg).model_dump(mode="json")})
+    data = GeneralChatMessageOut.model_validate(msg).model_dump(mode="json")
+    await broadcast_event("new_general_message", data)
     return msg
 
 

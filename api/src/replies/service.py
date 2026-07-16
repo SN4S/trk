@@ -7,7 +7,7 @@ from src.tickets.models import TicketAssignment
 import logging
 import httpx
 from src.config import settings
-from src.websockets.manager import manager
+from src.notifications.service import broadcast_event, notify_users
 from src.replies.schemas import ReplyOut
 from src.tickets.models import Ticket
 
@@ -95,7 +95,7 @@ async def create(
 ) -> Reply:
     from src.tickets.service import _encode_mentions
     if is_support:
-        message = await _encode_mentions(db, message)
+        message, _ = await _encode_mentions(db, message)
     reply = Reply(
         ticket_id=ticket_id,
         message=message,
@@ -128,7 +128,11 @@ async def create(
     data["group_id"] = group_id
     data["soc_user_name"] = soc_user_name
 
-    await manager.broadcast({"type": "new_reply", "data": data})
+    await broadcast_event("new_reply", data)
+    
+    if assignee_id:
+        await notify_users(db, "new_reply", data, user_ids=[assignee_id])
+        
     return created_reply
 
 
