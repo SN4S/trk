@@ -13,23 +13,23 @@ export interface ApiFolder {
   groups: ApiFolderGroup[]
 }
 
-const foldersStore = reactive({
-  folders: [] as ApiFolder[],
-  activeFolderId: null as number | null,
-  pending: false,
-})
-
 export function useFolders() {
+  const foldersStore = useState('folders:store', () => ({
+    folders: [] as ApiFolder[],
+    activeFolderId: null as number | null,
+    pending: false,
+  }))
+
   const { apiFetch } = useApi()
 
   async function fetchFolders() {
-    foldersStore.pending = true
+    foldersStore.value.pending = true
     try {
-      foldersStore.folders = await apiFetch<ApiFolder[]>('/folders/')
+      foldersStore.value.folders = await apiFetch<ApiFolder[]>('/folders/')
     } catch (e) {
       console.error(e)
     } finally {
-      foldersStore.pending = false
+      foldersStore.value.pending = false
     }
   }
 
@@ -38,15 +38,15 @@ export function useFolders() {
       method: 'POST',
       body: { name }
     })
-    foldersStore.folders.push(res)
+    foldersStore.value.folders.push(res)
     return res
   }
 
   async function deleteFolder(id: number) {
     await apiFetch(`/folders/${id}`, { method: 'DELETE' })
-    foldersStore.folders = foldersStore.folders.filter(f => f.id !== id)
-    if (foldersStore.activeFolderId === id) {
-      foldersStore.activeFolderId = null
+    foldersStore.value.folders = foldersStore.value.folders.filter(f => f.id !== id)
+    if (foldersStore.value.activeFolderId === id) {
+      foldersStore.value.activeFolderId = null
     }
   }
 
@@ -66,15 +66,15 @@ export function useFolders() {
   }
 
   function setActiveFolder(id: number | null) {
-    if (id === null || foldersStore.activeFolderId === id) {
-      foldersStore.activeFolderId = null // toggle off
+    if (id === null || foldersStore.value.activeFolderId === id) {
+      foldersStore.value.activeFolderId = null // toggle off
     } else {
-      foldersStore.activeFolderId = id
+      foldersStore.value.activeFolderId = id
     }
   }
 
   return {
-    store: foldersStore,
+    store: foldersStore.value,
     fetchFolders,
     createFolder,
     deleteFolder,

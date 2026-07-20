@@ -1,14 +1,14 @@
-const scrollPositions = new Map<string, number>()
-
 export function useChatScroll(key: Ref<string | number | null>) {
+    const scrollPositions = useState<Record<string, number>>('chat:scroll', () => ({}))
+
     function save(el: HTMLElement | null) {
         if (!el || key.value == null) return
-        scrollPositions.set(String(key.value), el.scrollTop)
+        scrollPositions.value[String(key.value)] = el.scrollTop
     }
 
     function restore(el: HTMLElement | null) {
         if (!el || key.value == null) return
-        const saved = scrollPositions.get(String(key.value))
+        const saved = scrollPositions.value[String(key.value)]
         if (saved != null) {
             el.scrollTop = saved
             return true

@@ -70,13 +70,15 @@ import { useFolders } from "~/composables/useFolders"
 import { useAuth } from "~/composables/useAuth"
 import { useApi } from "~/composables/useApi"
 import { useWebSocket } from "~/composables/useWebSocket"
+import { useToast } from "~/composables/useToast"
 
 const { currentUser } = useAuth()
 const { groups: allGroups, pending, error, fetchGroups } = useGroups()
 const { store, addGroupToFolder, removeGroupFromFolder } = useFolders()
 const { apiFetch } = useApi()
 
-// ── General Chat Last Message ────────────────────────────────────────────────
+// ── WebSocket ────────────────────────────────────────────────────────────────
+const { addToast } = useToast()
 const generalLastMessage = ref<string | null>(null)
 const generalLastTime = ref<Date | null>(null)
 const generalGroupObj = computed(() => ({ 
@@ -124,7 +126,7 @@ function onNewTicket(data: any) {
   if (group) {
     const author = data.soc_user_name || 'Клієнт'
     group.last_message = `${author}: ${data.message || ''}`
-    group.last_time = new Date(data.created_at)
+    group.last_time = new Date(data.created_at.endsWith('Z') ? data.created_at : data.created_at + 'Z')
   }
 }
 
@@ -181,7 +183,7 @@ async function addToFolder(folderId: number, groupId: number) {
   try {
     await addGroupToFolder(folderId, groupId)
   } catch (e: any) {
-    alert(e?.data?.detail ?? 'Помилка додавання до папки')
+    addToast({ title: 'Помилка', message: e?.data?.detail ?? 'Помилка додавання до папки', type: 'error' })
   } finally {
     closeMenu()
   }
@@ -191,7 +193,7 @@ async function removeFromFolder(folderId: number, groupId: number) {
   try {
     await removeGroupFromFolder(folderId, groupId)
   } catch (e: any) {
-    alert(e?.data?.detail ?? 'Помилка видалення з папки')
+    addToast({ title: 'Помилка', message: e?.data?.detail ?? 'Помилка видалення з папки', type: 'error' })
   } finally {
     closeMenu()
   }

@@ -3,15 +3,15 @@
     <!-- Reply Banner -->
     <div v-if="replyingToTicket || replyingToMessage" class="reply_banner">
       <div class="reply_info">
-        <template v-if="replyingToTicket">
-          <span class="reply_label">Відповідь на тікет: {{replyingToTicket.ticket_num}}</span>
-          <span class="reply_user">{{ replyingToTicket.soc_user_name }}</span>
-          <span class="reply_text">{{ replyingToTicket.message }}</span>
-        </template>
-        <template v-else-if="replyingToMessage">
+        <template v-if="replyingToMessage">
           <span class="reply_label">Відповідь</span>
           <span class="reply_user">{{ replyingToMessage.sender }}</span>
           <span class="reply_text">{{ replyingToMessage.text }}</span>
+        </template>
+        <template v-else-if="replyingToTicket">
+          <span class="reply_label">Відповідь на тікет: {{replyingToTicket.ticket_num}}</span>
+          <span class="reply_user">{{ replyingToTicket.soc_user_name }}</span>
+          <span class="reply_text">{{ replyingToTicket.message }}</span>
         </template>
       </div>
       <button class="cancel_reply" @click="emit('cancelReply')" title="Скасувати">✕</button>
@@ -31,15 +31,6 @@
           <li v-for="u in filteredUsers" :key="u.id" @mousedown.prevent="pickMention(u.username)">@{{ u.username }}</li>
         </ul>
       </div>
-      <div v-if="!hideCheckbox" class="checkbox-wrapper" title="Необхідна відповідь від клієнта">
-        <input 
-          id="check" 
-          type="checkbox" 
-          :checked="requiresClientReply"
-          @change="emit('update:requiresClientReply', ($event.target as HTMLInputElement).checked)"
-        />
-        <label for="check">❓</label>
-      </div>
       <button @click="onSend" :disabled="!modelValue.trim() && !replyingToTicket && !replyingToMessage">➤</button>
     </div>
   </div>
@@ -53,8 +44,6 @@ const props = defineProps<{
   modelValue: string
   replyingToTicket?: ApiTicket | null
   replyingToMessage?: { sender: string; text: string } | null
-  requiresClientReply?: boolean
-  hideCheckbox?: boolean
 }>()
 
 import { useMentionableUsers } from '~/composables/useMentionableUsers'
@@ -82,7 +71,6 @@ function pickMention(username: string) {
 
 const emit = defineEmits<{
   (e: 'update:modelValue', val: string): void
-  (e: 'update:requiresClientReply', val: boolean): void
   (e: 'send'): void
   (e: 'cancelReply'): void
 }>()
@@ -195,12 +183,6 @@ function onKeydown(e: KeyboardEvent) {
 .mention-list li { padding: 6px 12px; font-size: 13px; cursor: pointer; }
 .mention-list li:hover { background: var(--nav-item-bg-hover-color); }
 
-.input_bar #check {
-  width: 24px;
-  height: 24px;
-  cursor: pointer;
-}
-
 .input_bar button {
   background: var(--nav-item-bg-active-color);
   border: none;
@@ -216,38 +198,5 @@ function onKeydown(e: KeyboardEvent) {
 .input_bar button:disabled {
   opacity: 0.5;
   cursor: not-allowed;
-}
-
-.checkbox-wrapper {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  position: relative;
-  width: 32px;
-  height: 32px;
-}
-.checkbox-wrapper input[type="checkbox"] {
-  position: absolute;
-  opacity: 0;
-  cursor: pointer;
-  width: 100%;
-  height: 100%;
-  z-index: 2;
-}
-.checkbox-wrapper label {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 100%;
-  height: 100%;
-  background: var(--nav-item-bg-hover-color);
-  border-radius: 8px;
-  font-size: 16px;
-  transition: background 0.2s;
-  cursor: pointer;
-}
-.checkbox-wrapper input[type="checkbox"]:checked + label {
-  background: var(--accent);
-  color: #fff;
 }
 </style>

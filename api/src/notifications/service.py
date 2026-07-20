@@ -28,14 +28,18 @@ async def notify_users(db: AsyncSession, type: str, data: dict[str, Any], user_i
         for uid in active_user_ids
     ]
     db.add_all(notifications)
+    await db.flush()  # assigns PKs without a full commit
+    notification_ids = [n.id for n in notifications]
     await db.commit()
-    
-    # We must refresh the notifications to get the IDs and created_at timestamps.
-    for n in notifications:
-        await db.refresh(n)
+
+    # Re-fetch all in one query to get server-generated fields (created_at)
+    fresh_result = await db.execute(
+        select(Notification).where(Notification.id.in_(notification_ids))
+    )
+    fresh_notifications = fresh_result.scalars().all()
 
     # Broadcast to connected sockets
-    for notification in notifications:
+    for notification in fresh_notifications:
         notif_data = NotificationOut.model_validate(notification).model_dump(mode="json")
         await manager.send_personal_message({
             "type": "notification_event",

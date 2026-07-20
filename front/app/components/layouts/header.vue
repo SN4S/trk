@@ -11,10 +11,34 @@
     <!-- / END Filter Strip -->
     <!-- Start Dashboard -->
     <div class="dashboard_block">
-      <dashboard-ticket title="Всього:" :data="stats?.all ?? 0" color="red" />
-      <dashboard-ticket title="Не опрацьовані" :data="stats?.open ?? 0" color="blue" />
-      <dashboard-ticket title="В роботі" :data="stats?.pending ?? 0" color="green" />
-      <dashboard-ticket title="Завершені" :data="stats?.closed ?? 0" color="#9ec087" />
+      <dashboard-ticket 
+        title="Всього:" 
+        :data="stats?.all ?? 0" 
+        color="red" 
+        :active="filter.status === null"
+        @click="setStatus(null)"
+      />
+      <dashboard-ticket 
+        title="Відкритий" 
+        :data="stats?.open ?? 0" 
+        color="blue" 
+        :active="filter.status === 'open'"
+        @click="setStatus(filter.status === 'open' ? null : 'open')"
+      />
+      <dashboard-ticket 
+        title="В роботі" 
+        :data="stats?.pending ?? 0" 
+        color="green" 
+        :active="filter.status === 'pending'"
+        @click="setStatus(filter.status === 'pending' ? null : 'pending')"
+      />
+      <dashboard-ticket 
+        title="Закритий" 
+        :data="stats?.closed ?? 0" 
+        color="#9ec087" 
+        :active="filter.status === 'closed'"
+        @click="setStatus(filter.status === 'closed' ? null : 'closed')"
+      />
     </div>
     <!-- / Dashboard -->
       <userNotifications />
@@ -26,7 +50,9 @@
 <script setup lang="ts">
 import { useRoute } from 'vue-router'
 import { useAuth } from "~/composables/useAuth"
+import { useFilter } from '~/composables/useFilter'
 
+const { filter, setStatus } = useFilter()
 const { logout, currentUser } = useAuth()
 const route = useRoute()
 

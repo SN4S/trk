@@ -45,8 +45,15 @@ async def broadcast_event(event: BroadcastEvent, db: AsyncSession = Depends(get_
         
     elif event.type == "new_reply":
         assignee_id = event.data.get("ticket_assigned_to_id")
-        if assignee_id:
-            await notify_users(db, "new_reply", event.data, user_ids=[assignee_id])
+        is_support = event.data.get("is_support", False)
+        if not is_support:
+            if assignee_id:
+                await notify_users(db, "new_reply", event.data, user_ids=[assignee_id])
+            else:
+                admins_managers_query = select(User.id).where(User.role.in_(["admin", "manager"]), User.is_active == True)
+                result = await db.execute(admins_managers_query)
+                admin_manager_ids = result.scalars().all()
+                await notify_users(db, "new_reply", event.data, user_ids=list(admin_manager_ids))
             
     return {"status": "ok"}
 

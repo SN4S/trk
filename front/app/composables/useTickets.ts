@@ -36,10 +36,9 @@ export function useTickets(groupId?: MaybeRef<number | null>) {
     const { apiFetch } = useApi()
     const { filter } = useFilter()
     const { subscribe, unsubscribe } = useWebSocket()
-
-    const tickets = ref<ApiTicket[]>([])
-    const pending = ref(false)
-    const error = ref<string | null>(null)
+    const tickets = useState<ApiTicket[]>(`tickets:list:${toValue(groupId) ?? 'all'}`, () => [])
+    const pending = useState(`tickets:pending:${toValue(groupId) ?? 'all'}`, () => false)
+    const error = useState<string | null>(`tickets:error:${toValue(groupId) ?? 'all'}`, () => null)
 
     async function fetchTickets() {
         pending.value = true

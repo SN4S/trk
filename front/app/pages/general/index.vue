@@ -9,18 +9,14 @@
           v-else
           v-for="msg in mappedMessages"
           :key="msg.id"
-          :id="'msg-' + msg.id"
-          :message="msg"
+          :id="'reply-' + msg.id"
+          :message="{ ...msg, parent_reply: msg.parent, ticket: undefined }"
           :is-me="msg.is_support"
           :sender-name="msg.user?.username || 'Support'"
-          :hide-text="!!msg.ticket"
+          :hide-text="!!msg.ticket && !msg.message?.includes('Призначив(ла)')"
           @contextmenu.prevent="openMsgMenu($event, msg)"
       >
         <template #extra>
-          <div v-if="msg.parent" class="reply-quote" @click="scrollToMessage(msg.parent.id)">
-            <span class="reply-quote-user">{{ msg.parent.user?.username || 'Support' }}</span>
-            <span class="reply-quote-text">{{ msg.parent.message }}</span>
-          </div>
           <div v-if="msg.ticket && !msg.reply" class="forwarded-message">
             <span class="forward-label">↪ Переслано тікет від {{ msg.ticket.soc_user_name }}</span>
             <div class="reply-quote">
@@ -85,6 +81,7 @@ import { useWebSocket } from '~/composables/useWebSocket'
 const { apiFetch } = useApi()
 const { currentUser } = useAuth()
 const route = useRoute()
+const { addToast } = useToast()
 
 const messages = ref<any[]>([])
 const pending = ref(false)
@@ -209,8 +206,21 @@ function scrollToHash() {
 }
 
 const menu = ref({ show: false, x: 0, y: 0, msg: null as any })
-function openMsgMenu(e: MouseEvent, msg: any) {
-  menu.value = { show: true, x: e.clientX, y: e.clientY, msg }
+async function openMsgMenu(e: MouseEvent, msg: any) {
+  let x = e.clientX
+  let y = e.clientY
+  menu.value = { show: true, x, y, msg }
+  
+  await nextTick()
+  const menuEl = document.querySelector('.ctx-menu') as HTMLElement
+  if (menuEl) {
+    const rect = menuEl.getBoundingClientRect()
+    if (x + rect.width > window.innerWidth) x = window.innerWidth - rect.width - 10
+    if (y + rect.height > window.innerHeight) y = window.innerHeight - rect.height - 10
+    menu.value.x = x
+    menu.value.y = y
+  }
+
   document.addEventListener('click', closeCtxMenu, { once: true })
 }
 function closeCtxMenu() { menu.value.show = false }
@@ -223,15 +233,6 @@ function setReply(msg: any) {
   document.getElementById('message-f')?.focus()
 }
 
-function scrollToMessage(id: number | null | undefined) {
-  if (!id) return
-  const el = document.getElementById('msg-' + id)
-  if (el) {
-    el.scrollIntoView({ behavior: 'smooth', block: 'center' })
-    el.classList.add('highlight-message')
-    setTimeout(() => el.classList.remove('highlight-message'), 2000)
-  }
-}
 
 async function sendMessage() {
   if (!messageText.value.trim()) return
@@ -244,7 +245,7 @@ async function sendMessage() {
     replyingTo.value = null
     loadMessages()
   } catch (e: any) {
-    alert(e?.data?.detail ?? 'Помилка надсилання повідомлення')
+    addToast({ title: 'Помилка', message: e?.data?.detail ?? 'Помилка надсилання повідомлення', type: 'error' })
   }
 }
 </script>
@@ -369,7 +370,7 @@ async function sendMessage() {
 .reply-quote-user { display: block; font-weight: 600; color: var(--accent); }
 .reply-quote-text { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 300px; }
 
-.highlight-message {
+.highlight-ticket {
   animation: highlight 2s ease-out;
 }
 @keyframes highlight {

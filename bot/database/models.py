@@ -41,6 +41,7 @@ class Ticket(Base):
     created_at: Mapped["DateTime"] = mapped_column(DateTime, server_default=func.now())
     updated_at: Mapped["DateTime"] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
     status: Mapped[StatusEnum] = mapped_column(Enum(StatusEnum), default=StatusEnum.OPEN)
+    tg_message_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
 
     theme: Mapped["Theme"] = relationship()
     group: Mapped["Group"] = relationship()
@@ -54,9 +55,12 @@ class Reply(Base):
     is_support: Mapped[bool] = mapped_column(Boolean, nullable=False)
     user_id: Mapped[int] = mapped_column(ForeignKey("user.id"), nullable=True)
     created_at: Mapped["DateTime"] = mapped_column(DateTime, server_default=func.now())
+    tg_message_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    reply_to_reply_id: Mapped[int | None] = mapped_column(ForeignKey("reply.id", ondelete="CASCADE"), nullable=True)
 
     ticket: Mapped["Ticket"] = relationship(back_populates="replies")
     user: Mapped["User"] = relationship()
+    parent_reply: Mapped["Reply | None"] = relationship(remote_side=[id])
 
 class TicketAssignment(Base):
     __tablename__ = "ticket_assignment"

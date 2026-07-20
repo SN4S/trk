@@ -15,16 +15,16 @@
           d="M14.857 17.082a23.848 23.848 0 005.454-1.31A8.967 8.967 0 0118 9.75v-.7V9A6 6 0 006 9v.75a8.967 8.967 0 01-2.312 6.022c1.733.64 3.56 1.085 5.455 1.31m5.714 0a24.255 24.255 0 01-5.714 0m5.714 0a3 3 0 11-5.714 0"
         />
       </svg>
-      <span v-if="notifications.length > 0" class="badge">
-        {{ notifications.length > 99 ? '99+' : notifications.length }}
+      <span v-if="unreadCount > 0" class="badge">
+        {{ unreadCount > 99 ? '99+' : unreadCount }}
       </span>
     </button>
 
     <div v-if="showDropdown" class="dropdown-menu" @click.stop>
       <div class="dropdown-header">
         <h3>Сповіщення</h3>
-        <button v-if="notifications.length > 0" class="mark-all-btn" @click="markAllAsReadLocally">
-          Очистити всі
+        <button v-if="unreadCount > 0" class="mark-all-btn" @click="markAllAsReadLocally">
+          Прочитати всі
         </button>
       </div>
 
@@ -38,10 +38,12 @@
             v-for="notif in notifications"
             :key="notif.id"
             class="notification-item"
+            :class="{ 'is-read': notif.is_read }"
             @click="handleNotificationClick(notif)"
           >
             <div class="notif-content">
               <span class="notif-title">{{ getNotificationTitle(notif) }}</span>
+              <span v-if="getNotificationTheme(notif)" class="notif-theme">{{ getNotificationTheme(notif) }}</span>
               <span class="notif-desc">{{ getNotificationDesc(notif) }}</span>
             </div>
             <div class="notif-time">{{ formatTime(notif.created_at) }}</div>
@@ -53,10 +55,14 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { useRouter } from 'vue-router'
 import { useNotifications, type ApiNotification } from '~/composables/useNotifications'
 
 const { notifications, pending, initNotifications, markAsRead } = useNotifications()
+const router = useRouter()
+
+const unreadCount = computed(() => notifications.value.filter(n => !n.is_read).length)
 
 // Initializes fetch and WS listeners on mount
 initNotifications()
@@ -80,22 +86,53 @@ onUnmounted(() => {
 })
 
 function getNotificationTitle(notif: ApiNotification) {
-  if (notif.type === 'new_ticket') return `Новий тікет #${notif.data?.ticket_num || ''}`
-  if (notif.type === 'update_ticket') return `Оновлення тікету #${notif.data?.ticket_num || ''}`
-  if (notif.type === 'new_reply') return `Нова відповідь`
-  if (notif.type === 'new_general_message') return `Загальний чат`
-  return 'Сповіщення'
+  const groupName = notif.data?.group?.name || notif.data?.group_name
+  const ticketNum = notif.data?.ticket_num || notif.data?.ticket?.ticket_num
+
+  if (notif.type === 'assign_ticket') {
+    return ticketNum ? `Тікет - ${ticketNum}` : 'Призначення тікета'
+  }
+
+  if (notif.type === 'new_general_message') return 'Загальний чат'
+  
+  if (groupName) {
+    return ticketNum ? `${groupName} - ${ticketNum}` : groupName
+  }
+
+  return ticketNum ? `Тікет - ${ticketNum}` : 'Сповіщення'
+}
+
+function getNotificationTheme(notif: ApiNotification) {
+  if (notif.type === 'new_ticket' || notif.type === 'new_reply') {
+    return notif.data?.theme?.name || notif.data?.theme_name || notif.data?.ticket?.theme?.name || null
+  }
+  return null
 }
 
 function getNotificationDesc(notif: ApiNotification) {
-  if (notif.type === 'new_ticket') return notif.data?.message || 'Новий запит'
+  if (notif.type === 'new_ticket') {
+    return `Новий тікет: ${notif.data?.message || ''}`
+  }
+  if (notif.type === 'update_ticket') {
+    const statusMap: Record<string, string> = {
+      open: 'відкритий',
+      pending: 'в роботі',
+      closed: 'закритий'
+    }
+    const rawStatus = notif.data?.status
+    const status = rawStatus ? (statusMap[rawStatus] || rawStatus) : 'оновлено'
+    return `Оновлення статусу: ${status}`
+  }
+  if (notif.type === 'assign_ticket') {
+    const assignedTo = notif.data?.current_assignment?.assigned_to?.username || 'Вас'
+    return `Призначення тікета: на ${assignedTo}`
+  }
   if (notif.type === 'new_reply') {
-    const author = notif.data?.user?.username || notif.data?.soc_user_name || 'Клієнт'
-    return `${author}: ${notif.data?.message || ''}`
+    return `Нове повідомлення: ${notif.data?.message || ''}`
   }
   if (notif.type === 'new_general_message') {
     const author = notif.data?.user?.username || 'Колега'
-    return `${author}: ${notif.data?.message || ''}`
+    return `Нове повідомлення від ${author}: ${notif.data?.message || ''}`
   }
   return ''
 }
@@ -109,12 +146,30 @@ function formatTime(isoString: string) {
 async function handleNotificationClick(notif: ApiNotification) {
   await markAsRead(notif.id)
   showDropdown.value = false
-  // Optional: add router push logic based on notif.type and notif.data
+  
+  if (notif.type === 'new_general_message') {
+    router.push(`/general#reply-${notif.data?.id || ''}`)
+  } else if (notif.type === 'new_reply') {
+    if (notif.data?.group_id) {
+       router.push(`/group/${notif.data.group_id}#reply-${notif.data.id}`)
+    } else if (notif.data?.ticket?.group_id) {
+       router.push(`/group/${notif.data.ticket.group_id}#reply-${notif.data.id}`)
+    } else {
+       router.push(`/#reply-${notif.data?.id || ''}`)
+    }
+  } else if (['new_ticket', 'update_ticket', 'assign_ticket'].includes(notif.type)) {
+    const ticketId = notif.data?.id
+    if (notif.data?.group_id) {
+       router.push(`/group/${notif.data.group_id}#ticket-${ticketId}`)
+    } else {
+       router.push(`/#ticket-${ticketId}`)
+    }
+  }
 }
 
 async function markAllAsReadLocally() {
   // Ideally, call an API to mark all as read. For now, mark them one by one.
-  const toMark = [...notifications.value]
+  const toMark = notifications.value.filter(n => !n.is_read)
   for (const n of toMark) {
     await markAsRead(n.id)
   }
@@ -233,8 +288,12 @@ async function markAllAsReadLocally() {
   justify-content: space-between;
   align-items: flex-start;
   cursor: pointer;
-  transition: background-color 0.2s;
+  transition: background-color 0.2s, opacity 0.2s;
   gap: 12px;
+}
+
+.notification-item.is-read {
+  opacity: 0.6;
 }
 
 .notification-item:last-child {
@@ -257,6 +316,15 @@ async function markAllAsReadLocally() {
   font-weight: 600;
   font-size: 13px;
   color: var(--message-text-color);
+}
+
+.notif-theme {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--accent, #e05252);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .notif-desc {

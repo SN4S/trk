@@ -139,12 +139,14 @@
 
 <script setup lang="ts">
 import { useApi } from '~/composables/useApi'
+import { useToast } from '~/composables/useToast'
 import { ref, computed, onMounted, nextTick } from 'vue'
 import FormPopup from "~/components/form/popup/index.vue";
 import removeIcon from '~/assets/img/icons/remove.png'
 import addIcon from '~/assets/img/icons/plus.png'
 
 const { apiFetch } = useApi()
+const { addToast } = useToast()
 
 interface User {
   id: number
@@ -309,7 +311,7 @@ async function deleteUser(userId: number) {
     })
     fetchUsers()
   } catch (e: any) {
-    alert(e?.data?.detail ?? 'Помилка видалення: ' + (e?.data?.detail || ''))
+    addToast({ title: 'Помилка', message: e?.data?.detail ?? 'Помилка видалення', type: 'error' })
   }
 }
 </script>

@@ -15,12 +15,11 @@ interface UserOut{
     role: string,
 }
 
-// Token held only in memory — not localStorage (XSS protection)
-const accessToken = ref<string | null>(null)
-const currentUser = ref<UserOut | null>(null)
 let globalRefreshPromise: Promise<boolean> | null = null
 
 export function useAuth(){
+    const accessToken = useState<string | null>('auth:accessToken', () => null)
+    const currentUser = useState<UserOut | null>('auth:currentUser', () => null)
     const config = useRuntimeConfig()
     const baseURL = config.public.apiBase as string
     const router = useRouter()

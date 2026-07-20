@@ -11,14 +11,7 @@
           @update:model-value="v => setTheme(v ? +v : null)"
       />
 
-      <form-select
-          id="filter-status"
-          :model-value="filter.status"
-          :options="STATUSES"
-          placeholder="Усі статуси"
-          size="small"
-          @update:model-value="v => setStatus((v || null) as TicketStatus | null)"
-      />
+
 
 
     <!-- My Tickets -->
@@ -44,11 +37,7 @@ import { useThemes } from '~/composables/useThemes'
 const { filter, setTheme, setStatus, setAssignedToMe, reset } = useFilter()
 const { themes, fetchThemes } = useThemes()
 
-const STATUSES = [
-  { value: 'open',    label: 'Відкриті' },
-  { value: 'pending', label: 'В роботі' },
-  { value: 'closed',  label: 'Закриті' },
-] as const
+
 
 const hasActiveFilters = computed(
     () => filter.status !== null || filter.themeId !== null || filter.assignedToMe

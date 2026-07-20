@@ -7,9 +7,12 @@ export interface ApiReply {
     is_support: boolean
     user_id: number | null
     created_at: string
+    tg_message_id: number | null
+    reply_to_reply_id: number | null
 
     ticket: { id: number; name: string ;soc_user_name:string } | null
     user: { id: number; username: string } | null
+    parent_reply: { id: number; message: string; user: { id: number; username: string } | null } | null
 }
 
 
@@ -18,9 +21,9 @@ export function useRepliesT(ticketId?: MaybeRef<number | null>) {
     const { filter } = useFilter()
     const { subscribe, unsubscribe } = useWebSocket()
 
-    const replies = ref<ApiReply[]>([])
-    const pending = ref(false)
-    const error = ref<string | null>(null)
+    const replies = useState<ApiReply[]>(`replies-t:list:${toValue(ticketId) ?? 'all'}`, () => [])
+    const pending = useState(`replies-t:pending:${toValue(ticketId) ?? 'all'}`, () => false)
+    const error = useState<string | null>(`replies-t:error:${toValue(ticketId) ?? 'all'}`, () => null)
 
     async function fetchReplies() {
         pending.value = true
@@ -80,9 +83,9 @@ export function useRepliesG(groupId?: MaybeRef<number | null>) {
     const { filter } = useFilter()
     const { subscribe, unsubscribe } = useWebSocket()
 
-    const replies = ref<ApiReply[]>([])
-    const pending = ref(false)
-    const error = ref<string | null>(null)
+    const replies = useState<ApiReply[]>(`replies-g:list:${toValue(groupId) ?? 'all'}`, () => [])
+    const pending = useState(`replies-g:pending:${toValue(groupId) ?? 'all'}`, () => false)
+    const error = useState<string | null>(`replies-g:error:${toValue(groupId) ?? 'all'}`, () => null)
 
     async function fetchReplies() {
         pending.value = true

@@ -1,3 +1,5 @@
+from datetime import timezone
+
 from sqlalchemy import select, desc, func, case
 from sqlalchemy.orm import selectinload
 from database import models
@@ -39,8 +41,13 @@ async def reserve_ticket(group_chat_id: int, group_title: str, theme_id: int, so
         # Get count of tickets for this group
         count_result = await session.execute(select(func.count(Ticket.id)).where(Ticket.group_id == group.id))
         count = count_result.scalar() or 0
-        slug = "".join(c for c in group.name if c.isalnum()) or "group"
-        ticket_num = f"{slug}-{count + 1}"
+        slug_parts = []
+        for word in group.name.replace('-', ' ').replace('_', ' ').split():
+            clean_word = "".join(c for c in word if c.isalnum())
+            if clean_word:
+                slug_parts.append(clean_word[0].upper())
+        slug = "".join(slug_parts) or "T"
+        ticket_num = f"{slug}-{(count + 1):06d}"
 
         ticket = Ticket(
             ticket_num=ticket_num,
@@ -56,8 +63,15 @@ async def reserve_ticket(group_chat_id: int, group_title: str, theme_id: int, so
 
 async def finalize_ticket(ticket_id: int, message: str) -> Ticket:
     async with models.async_session() as session:
-        ticket = await session.get(Ticket, ticket_id)
-        if ticket:
+        ticket_row = await session.execute(
+            select(Ticket, Group.name.label("group_name"), Theme.name.label("theme_name"))
+            .outerjoin(Group, Ticket.group_id == Group.id)
+            .outerjoin(Theme, Ticket.theme_id == Theme.id)
+            .where(Ticket.id == ticket_id)
+        )
+        ticket_info = ticket_row.first()
+        if ticket_info:
+            ticket, group_name, theme_name = ticket_info
             ticket.message = message
             await session.commit()
             await session.refresh(ticket)
@@ -66,11 +80,23 @@ async def finalize_ticket(ticket_id: int, message: str) -> Ticket:
                 "group_id": ticket.group_id,
                 "soc_user_name": ticket.soc_user_name,
                 "message": ticket.message,
-                "created_at": ticket.created_at.isoformat() if ticket.created_at else None,
+                "created_at": ticket.created_at.replace(tzinfo=timezone.utc).isoformat() if ticket.created_at else None,
                 "ticket_num": ticket.ticket_num,
                 "theme_id": ticket.theme_id,
                 "status": ticket.status.value if hasattr(ticket.status, "value") else ticket.status,
+                "group_name": group_name,
+                "theme_name": theme_name,
             }))
+            return ticket
+        return None
+
+async def set_ticket_tg_message_id(ticket_id: int, tg_message_id: int) -> Ticket | None:
+    async with models.async_session() as session:
+        ticket = await session.get(Ticket, ticket_id)
+        if ticket:
+            ticket.tg_message_id = tg_message_id
+            await session.commit()
+            await session.refresh(ticket)
         return ticket
 
 async def delete_ticket(ticket_id: int):
@@ -86,9 +112,9 @@ async def get_theme_name(theme_id: int) -> str | None:
         theme = await session.get(Theme, theme_id)
         return theme.name if theme else None
 
-async def add_reply(ticket_id: int, message: str, is_support: bool, user_id: int | None = None) -> dict:
+async def add_reply(ticket_id: int, message: str, is_support: bool, user_id: int | None = None, tg_message_id: int | None = None, reply_to_reply_id: int | None = None) -> dict:
     async with models.async_session() as session:
-        reply = Reply(ticket_id=ticket_id, message=message, is_support=is_support, user_id=user_id)
+        reply = Reply(ticket_id=ticket_id, message=message, is_support=is_support, user_id=user_id, tg_message_id=tg_message_id, reply_to_reply_id=reply_to_reply_id)
         session.add(reply)
         await session.commit()
         await session.refresh(reply)
@@ -108,10 +134,21 @@ async def add_reply(ticket_id: int, message: str, is_support: bool, user_id: int
         assignment = latest_assignment.scalar_one_or_none()
         assignee_id = assignment.assigned_to_id if assignment else None
 
-        # Fetch group_id and soc_user_name for sidebar update
-        ticket_obj = await session.get(Ticket, ticket_id)
-        group_id = ticket_obj.group_id if ticket_obj else None
-        soc_user_name = ticket_obj.soc_user_name if ticket_obj else None
+        # Fetch group_id, soc_user_name, group_name, theme_name, ticket_num for frontend
+        ticket_row = await session.execute(
+            select(Ticket, Group.name.label("group_name"), Theme.name.label("theme_name"))
+            .outerjoin(Group, Ticket.group_id == Group.id)
+            .outerjoin(Theme, Ticket.theme_id == Theme.id)
+            .where(Ticket.id == ticket_id)
+        )
+        ticket_info = ticket_row.first()
+        if ticket_info:
+            ticket_obj, group_name, theme_name = ticket_info
+            group_id = ticket_obj.group_id
+            soc_user_name = ticket_obj.soc_user_name
+            ticket_num = ticket_obj.ticket_num
+        else:
+            group_id = soc_user_name = group_name = theme_name = ticket_num = None
 
         data = {
             "id": reply.id,
@@ -119,10 +156,13 @@ async def add_reply(ticket_id: int, message: str, is_support: bool, user_id: int
             "message": reply.message,
             "is_support": reply.is_support,
             "user_id": reply.user_id,
-            "created_at": reply.created_at.isoformat() if reply.created_at else None,
+            "created_at": reply.created_at.replace(tzinfo=timezone.utc).isoformat() if reply.created_at else None,
             "ticket_assigned_to_id": assignee_id,
             "group_id": group_id,
             "soc_user_name": soc_user_name,
+            "group_name": group_name,
+            "theme_name": theme_name,
+            "ticket_num": ticket_num,
         }
         if admin_name:
             data["user"] = {"id": user_id, "username": admin_name}
@@ -164,6 +204,13 @@ async def get_open_tickets_for_user(soc_user_id: int) -> list[Ticket]:
 async def get_ticket_by_id(ticket_id: int) -> Ticket | None:
     async with models.async_session() as session:
         return await session.get(Ticket, ticket_id)
+
+async def get_reply_by_tg_message_id(tg_message_id: int, ticket_id: int) -> Reply | None:
+    async with models.async_session() as session:
+        result = await session.execute(
+            select(Reply).where(Reply.tg_message_id == tg_message_id, Reply.ticket_id == ticket_id)
+        )
+        return result.scalar_one_or_none()
 
 
 # help methods for api calls

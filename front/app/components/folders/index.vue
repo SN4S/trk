@@ -41,6 +41,7 @@ const {
   deleteFolder,
   setActiveFolder,
 } = useFolders()
+const { addToast } = useToast()
 
 // ── Create folder ────────────────────────────────────────────────────────────
 const newFolderName = ref('')
@@ -64,7 +65,7 @@ async function submitCreate() {
     creating.value = false
     newFolderName.value = ''
   } catch (e: any) {
-    alert(e?.data?.detail ?? 'Помилка створення папки')
+    addToast({ title: 'Помилка', message: e?.data?.detail ?? 'Помилка створення папки', type: 'error' })
   }
 }
 

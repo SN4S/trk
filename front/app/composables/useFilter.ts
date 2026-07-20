@@ -18,14 +18,14 @@ export interface FilterState {
     assignedToMe: boolean
 }
 
-const state = reactive<FilterState>({
-    search: '',
-    themeId: null,
-    status: null,
-    assignedToMe: false,
-})
-
 export function useFilter() {
+    const state = useState<FilterState>('filter:state', () => ({
+        search: '',
+        themeId: null,
+        status: null,
+        assignedToMe: false,
+    }))
+
     const route = useRoute()
 
     /** The currently open group ID (null = global / no chat open) */
@@ -41,31 +41,31 @@ export function useFilter() {
     const isChatMode = computed(() => activeGroupId.value !== null || isGeneralMode.value)
 
     function setSearch(val: string) {
-        state.search = val
+        state.value.search = val
     }
 
     function setTheme(id: number | null) {
-        state.themeId = id
+        state.value.themeId = id
     }
 
     function setStatus(s: TicketStatus | null) {
-        state.status = s
+        state.value.status = s
     }
 
     function setAssignedToMe(val: boolean) {
-        state.assignedToMe = val
+        state.value.assignedToMe = val
     }
 
     function reset() {
-        state.search = ''
-        state.themeId = null
-        state.status = null
-        state.assignedToMe = false
+        state.value.search = ''
+        state.value.themeId = null
+        state.value.status = null
+        state.value.assignedToMe = false
     }
 
     return {
         /** Reactive filter values */
-        filter: readonly(state),
+        filter: readonly(state.value),
         activeGroupId,
         isChatMode,
         setSearch,

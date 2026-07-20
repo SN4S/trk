@@ -18,17 +18,16 @@ export function useNotifications() {
     const { apiFetch } = useApi()
     const { subscribe, unsubscribe } = useWebSocket()
     const { isLoggedIn } = useAuth()
-    
-    const notifications = ref<ApiNotification[]>([])
-    const pending = ref(false)
-    const error = ref<string | null>(null)
+    const notifications = useState<ApiNotification[]>('notifications:list', () => [])
+    const pending = useState('notifications:pending', () => false)
+    const error = useState<string | null>('notifications:error', () => null)
 
     async function fetchNotifications() {
         if (!isLoggedIn.value) return
         pending.value = true
         error.value = null
         try {
-            const data = await apiFetch<ApiNotification[]>('/notifications?unread_only=true')
+            const data = await apiFetch<ApiNotification[]>('/notifications')
             notifications.value = data
         } catch (e: any) {
             error.value = e?.message || 'Помилка завантаження сповіщень'
@@ -40,7 +39,8 @@ export function useNotifications() {
     async function markAsRead(id: number) {
         try {
             await apiFetch(`/notifications/${id}/read`, { method: 'POST' })
-            notifications.value = notifications.value.filter(n => n.id !== id)
+            const n = notifications.value.find(n => n.id === id)
+            if (n) n.is_read = true
         } catch (e: any) {
             console.error('Помилка при прочитанні сповіщення', e)
         }
@@ -57,20 +57,28 @@ export function useNotifications() {
             let routePath = '/'
 
             if (payload.type === 'new_ticket') {
-                title = 'Новий тікет'
-                message = `Створено тікет #${payload.data?.ticket_num || ''}`
+                title = `Новий запит #${payload.data?.ticket_num || ''}`
+                const author = payload.data?.soc_user_name || 'Клієнт'
+                message = `Від ${author}: ${payload.data?.message || ''}`
                 hash = `ticket-${payload.data?.id}`
-            } else if (payload.type === 'update_ticket' || payload.type === 'assign_ticket') {
-                title = 'Оновлення тікета'
-                message = `Тікет #${payload.data?.ticket_num || ''} оновлено/призначено`
+            } else if (payload.type === 'update_ticket') {
+                title = `Оновлено тікет #${payload.data?.ticket_num || ''}`
+                const status = payload.data?.status || 'оновлено'
+                message = `Статус змінено на: ${status}`
+                hash = `ticket-${payload.data?.id}`
+            } else if (payload.type === 'assign_ticket') {
+                const assignedBy = payload.data?.current_assignment?.assigned_by?.username || 'Колега'
+                title = `${assignedBy} призначив(ла) тікет #${payload.data?.ticket_num || ''}`
+                const assignedTo = payload.data?.current_assignment?.assigned_to?.username || 'Вас'
+                message = `Тікет було призначено на ${assignedTo}`
                 hash = `ticket-${payload.data?.id}`
             } else if (payload.type === 'new_reply') {
-                title = 'Нова відповідь'
+                title = `Нова відповідь`
                 const author = payload.data?.user?.username || payload.data?.soc_user_name || 'Клієнт'
                 message = `${author}: ${payload.data?.message || ''}`
                 hash = `ticket-${payload.data?.ticket_id}`
             } else if (payload.type === 'new_general_message') {
-                title = 'Загальний чат'
+                title = `Загальний чат`
                 const author = payload.data?.user?.username || 'Колега'
                 message = `${author}: ${payload.data?.message || ''}`
                 hash = `msg-${payload.data?.id}`

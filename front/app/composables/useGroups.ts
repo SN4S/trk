@@ -9,10 +9,10 @@ export interface ApiGroup {
 export function useGroups() {
     const { apiFetch } = useApi()
     const { filter } = useFilter()
-
-    const groups = ref<ApiGroup[]>([])
-    const pending = ref(false)
-    const error = ref<string | null>(null)
+    const { subscribe, unsubscribe } = useWebSocket()
+    const groups = useState<ApiGroup[]>('groups:list', () => [])
+    const pending = useState('groups:pending', () => false)
+    const error = useState<string | null>('groups:error', () => null)
 
     async function fetchGroups() {
         pending.value = true
@@ -29,9 +29,18 @@ export function useGroups() {
         }
     }
 
+    function onNewTicket() {
+        fetchGroups()
+    }
+
     // Fetch once on mount, no longer watching filter.search
     onMounted(() => {
         fetchGroups()
+        subscribe('new_ticket', onNewTicket)
+    })
+
+    onUnmounted(() => {
+        unsubscribe('new_ticket', onNewTicket)
     })
 
     return { groups, pending, error, fetchGroups }

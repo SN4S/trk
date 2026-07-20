@@ -3,7 +3,7 @@ import os
 from dotenv import load_dotenv
 from telegram import (
     Update, InlineKeyboardButton, InlineKeyboardMarkup,
-    ReplyKeyboardMarkup, ReplyKeyboardRemove, KeyboardButton
+    ReplyKeyboardMarkup, ReplyKeyboardRemove, KeyboardButton, BotCommand
 )
 from telegram.ext import (
     Application, CommandHandler, ContextTypes, CallbackQueryHandler,
@@ -14,7 +14,17 @@ from telegram.error import BadRequest
 from database.models import init_engine, create_tables
 from database import service
 
-THEME, MESSAGE, CONFIRM, ADDINFO, ADDINFO_PICK = range(5)
+THEME, MESSAGE, CONFIRM, ADDINFO, ADDINFO_PICK, ADDINFO_CONFIRM = range(6)
+
+def _status_ua(status) -> str:
+    val = status.value if hasattr(status, "value") else status
+    if val == "open":
+        return "Відкритий"
+    elif val == "pending":
+        return "В очікуванні"
+    elif val == "closed":
+        return "Закритий"
+    return str(val)
 
 # Cached at startup — avoids a Telegram API call on every ticket send
 _bot_username: str = ""
@@ -28,7 +38,7 @@ MAIN_KB = ReplyKeyboardMarkup(
 )
 MY_TICKETS_FILTER = filters.TEXT & filters.Regex(f"^{MY_TICKETS_BTN}$") & filters.ChatType.PRIVATE
 
-# Keyboard shown while waiting for text input
+# Keyboard shown while waiting for text input in private chats
 CANCEL_BTN = "❌ Скасувати"
 CANCEL_KB = ReplyKeyboardMarkup(
     [[KeyboardButton(CANCEL_BTN)]],
@@ -38,22 +48,16 @@ CANCEL_KB = ReplyKeyboardMarkup(
 
 
 async def _remove_keyboard(context: ContextTypes.DEFAULT_TYPE, chat_id: int) -> None:
-    """Send and immediately delete a ghost message to dismiss the reply keyboard."""
     try:
         ghost = await context.bot.send_message(chat_id, "\u200b", reply_markup=ReplyKeyboardRemove())
         await ghost.delete()
     except BadRequest:
         pass
 
-
 async def _restore_main_kb(context: ContextTypes.DEFAULT_TYPE, chat_id: int, text: str) -> None:
-    """Send a message that restores the persistent main keyboard in private chats."""
     await context.bot.send_message(chat_id, text, reply_markup=MAIN_KB)
 
-
 async def _finish(context: ContextTypes.DEFAULT_TYPE, chat_id: int, text: str) -> None:
-    """Delete pending prompt, edit tracked bot msg (or fold text into the
-    restore msg if there's none), restore MAIN_KB."""
     prompt_msg_id = context.user_data.get("prompt_msg_id")
     if prompt_msg_id:
         try:
@@ -62,6 +66,17 @@ async def _finish(context: ContextTypes.DEFAULT_TYPE, chat_id: int, text: str) -
             pass
 
     bot_msg_id = context.user_data.get("bot_msg_id")
+    chat = await context.bot.get_chat(chat_id)
+    if chat.type != "private":
+        if bot_msg_id:
+            try:
+                await context.bot.delete_message(chat_id=chat_id, message_id=bot_msg_id)
+            except BadRequest:
+                pass
+        if text:
+            await context.bot.send_message(chat_id, text)
+        return
+
     if bot_msg_id:
         try:
             await context.bot.edit_message_text(chat_id=chat_id, message_id=bot_msg_id, text=text)
@@ -86,16 +101,58 @@ async def step(update, context, text, markup=None):
 
 async def delete_user_msg(update):
     try:
-        await update.message.delete()
+        if update.message:
+            await update.message.delete()
     except BadRequest:
         pass
 
 async def post_support_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat = update.effective_chat
-    url = f"https://t.me/{_bot_username}?start=support_{chat.id}"
-    kb = InlineKeyboardMarkup([[InlineKeyboardButton("Звернутись у підтримку", url=url)]])
-    await context.bot.send_message(chat.id, "Потрібна допомога? Натисніть кнопку нижче:", reply_markup=kb)
+    kb = InlineKeyboardMarkup([
+        [InlineKeyboardButton("🎫 Звернутись у підтримку", callback_data="create_ticket")]
+    ])
+    await context.bot.send_message(
+        chat.id, 
+        "Натисніть кнопку нижче, щоб звернутись у підтримку:", 
+        reply_markup=kb
+    )
 
+
+async def support_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat = update.effective_chat
+    if update.message:
+        await delete_user_msg(update)
+    if chat.type == "private":
+        if update.message:
+            await update.message.reply_text("Ця команда працює лише в групах. В приватних повідомленнях використовуйте /start.")
+        elif update.callback_query:
+            await update.callback_query.answer("Ця кнопка працює лише в групах.", show_alert=True)
+        return ConversationHandler.END
+
+    group_chat_id = chat.id
+    context.user_data.clear()
+    context.user_data["group_chat_id"] = group_chat_id
+    context.user_data["group_title"] = chat.title
+
+    themes = await service.get_themes()
+    if not themes:
+        if update.message:
+            await update.message.reply_text("Теми звернень не налаштовані.")
+        elif update.callback_query:
+            await update.callback_query.answer("Теми звернень не налаштовані.", show_alert=True)
+        return ConversationHandler.END
+
+    kb = [[InlineKeyboardButton(t.name, callback_data=f"theme_{t.id}")] for t in themes]
+    kb.append([InlineKeyboardButton("❌ Скасувати", callback_data="cancel_cmd")])
+    
+    text = f"@{update.effective_user.username or update.effective_user.first_name}, оберіть тему звернення:"
+    if update.callback_query:
+        await update.callback_query.answer()
+        msg = await context.bot.send_message(chat.id, text, reply_markup=InlineKeyboardMarkup(kb))
+        context.user_data["bot_msg_id"] = msg.message_id
+    else:
+        await step(update, context, text, InlineKeyboardMarkup(kb))
+    return THEME
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     args = context.args
@@ -104,9 +161,13 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not args:
         if is_private:
             await update.message.reply_text(
-                "Вітаємо! Натисніть кнопку «Звернутись у підтримку» у вашій групі, "
+                "Вітаємо! Використайте команду /support у вашій групі, "
                 "або перегляньте свої тікети нижче.",
                 reply_markup=MAIN_KB,
+            )
+        else:
+            await update.message.reply_text(
+                "Вітаємо! Використайте команду /support, щоб звернутись у підтримку в цій групі."
             )
         return ConversationHandler.END
 
@@ -128,7 +189,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if not args[0].startswith("support_"):
         await update.message.reply_text(
-            "Натисніть кнопку «Звернутись у підтримку» у вашій групі.",
+            "Використайте команду /support у вашій групі.",
             reply_markup=MAIN_KB if is_private else None,
         )
         return ConversationHandler.END
@@ -155,20 +216,137 @@ async def get_addinfo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.message.text == CANCEL_BTN:
         return await cancel_cmd(update, context)
 
+    ticket_id = context.user_data["addinfo_id"]
+    ticket_num = context.user_data["addinfo_num"]
+    reply_to_tg_msg_id = context.user_data.get("reply_to_tg_msg_id")
+
+    reply_text = update.message.text
+    context.user_data["reply_message"] = reply_text
+    
     await delete_user_msg(update)
+
+    reply_to_reply_id = context.user_data.get("reply_to_reply_id")
+    if reply_to_tg_msg_id and not reply_to_reply_id:
+        reply = await service.get_reply_by_tg_message_id(reply_to_tg_msg_id, ticket_id)
+        if reply:
+            reply_to_reply_id = reply.id
+            
+    if not reply_to_reply_id and update.message.reply_to_message:
+        reply = await service.get_reply_by_tg_message_id(update.message.reply_to_message.message_id, ticket_id)
+        if reply:
+            reply_to_reply_id = reply.id
+            reply_to_tg_msg_id = update.message.reply_to_message.message_id
+            
+    context.user_data["reply_to_reply_id"] = reply_to_reply_id
+    context.user_data["reply_to_tg_msg_id"] = reply_to_tg_msg_id
+
+    prompt_msg_id = context.user_data.get("prompt_msg_id")
+    if prompt_msg_id:
+        try:
+            await context.bot.delete_message(chat_id=update.effective_chat.id, message_id=prompt_msg_id)
+        except BadRequest:
+            pass
+        context.user_data["prompt_msg_id"] = None
+
+    if update.effective_chat.type == "private":
+        await _remove_keyboard(context, update.effective_chat.id)
+
+    kb = InlineKeyboardMarkup([
+        [InlineKeyboardButton("Відправити", callback_data="send_reply")],
+        [InlineKeyboardButton("Редагувати", callback_data="edit_reply")],
+        [InlineKeyboardButton("Скасувати", callback_data="cancel_cmd")],
+    ])
+
+    text = (
+        f"Додаткова інформація до тікету #{ticket_num}\n\n"
+        f"Повідомлення: {reply_text}\n\n"
+        f"Відправити?"
+    )
+    if update.effective_chat.type != "private":
+        text = f"@{update.effective_user.username or update.effective_user.first_name}, {text}"
+
+    await step(update, context, text, kb)
+    return ADDINFO_CONFIRM
+
+async def edit_reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query
+    await q.answer()
+    
+    text = "Введіть новий текст додаткової інформації:"
+    if q.message.chat.type != "private":
+        text = f"@{update.effective_user.username or update.effective_user.first_name}, {text}"
+        cancel_inline = InlineKeyboardMarkup([[InlineKeyboardButton("❌ Скасувати", callback_data="cancel_cmd")]])
+        msg = await context.bot.send_message(q.message.chat_id, text, reply_markup=cancel_inline)
+    else:
+        msg = await context.bot.send_message(q.message.chat_id, text, reply_markup=CANCEL_KB)
+    
+    context.user_data["prompt_msg_id"] = msg.message_id
+    try:
+        await q.message.delete()
+    except BadRequest:
+        pass
+    
+    return ADDINFO
+
+async def confirm_reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query
+    await q.answer()
+
+    if q.data == "cancel_cmd":
+        return await cancel_cmd(update, context)
 
     ticket_id = context.user_data["addinfo_id"]
     ticket_num = context.user_data["addinfo_num"]
-    await service.add_reply(ticket_id, update.message.text, is_support=False)
+    reply_to_tg_msg_id = context.user_data.get("reply_to_tg_msg_id")
+    reply_to_reply_id = context.user_data.get("reply_to_reply_id")
+    reply_text = context.user_data["reply_message"]
+
+    chat_type = update.effective_chat.type
+    user_name = update.effective_user.username or update.effective_user.first_name
+
+    if chat_type != "private":
+        confirm_text = (
+            f"✅ @{user_name}, інформацію додано до тікету #{ticket_num}\n"
+            f"Повідомлення: {reply_text}"
+        )
+    else:
+        confirm_text = (
+            f"Додаткова інформація по тікету {ticket_num} додана ✅\n"
+            f"Повідомлення: {reply_text}"
+        )
+
+    bot_msg_id = context.user_data.get("bot_msg_id")
+    if bot_msg_id:
+        try:
+            await context.bot.delete_message(chat_id=update.effective_chat.id, message_id=bot_msg_id)
+        except BadRequest:
+            pass
+
+    confirm_msg = await context.bot.send_message(
+        chat_id=update.effective_chat.id,
+        text=confirm_text,
+        reply_to_message_id=reply_to_tg_msg_id if reply_to_tg_msg_id else None
+    )
+
+    if chat_type == "private":
+        await _restore_main_kb(context, update.effective_chat.id, "Головне меню")
+
+    await service.add_reply(
+        ticket_id, 
+        reply_text, 
+        is_support=False, 
+        tg_message_id=confirm_msg.message_id,
+        reply_to_reply_id=reply_to_reply_id
+    )
 
     ticket = await service.get_ticket_by_num(ticket_num)
     if ticket and ticket.group and ticket.group.tg_group_id:
-        await context.bot.send_message(
-            ticket.group.tg_group_id,
-            f"💬 Додаткова інформація по тікету #{ticket_num}:\n{update.message.text}"
-        )
+        if chat_type == "private":
+            await context.bot.send_message(
+                ticket.group.tg_group_id,
+                f"💬 Додаткова інформація по тікету #{ticket_num}:\n{reply_text}"
+            )
 
-    await _finish(context, update.effective_chat.id, f"Додаткова інформація по тікету {ticket_num} додана ✅")
     context.user_data.clear()
     return ConversationHandler.END
 
@@ -190,14 +368,22 @@ async def choose_theme(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["ticket_num"] = ticket.ticket_num
     context.user_data["ticket_theme"] = await service.get_theme_name(theme_id=context.user_data["theme_id"])
 
-    await q.edit_message_text(
-        f"Заявка №{ticket.ticket_num}\nТема: {context.user_data['ticket_theme']}"
-    )
-    msg = await context.bot.send_message(
-        q.message.chat_id,
-        "Введіть текст звернення:",
-        reply_markup=CANCEL_KB,
-    )
+    chat_type = q.message.chat.type
+    if chat_type != "private":
+        cancel_inline = InlineKeyboardMarkup([[InlineKeyboardButton("❌ Скасувати", callback_data="cancel_cmd")]])
+        await q.edit_message_text(f"Заявка №{ticket.ticket_num}\nТема: {context.user_data['ticket_theme']}\n")
+        msg = await context.bot.send_message(
+            q.message.chat_id,
+            f"@{user.username or user.first_name}, введіть текст звернення:",
+            reply_markup=cancel_inline,
+        )
+    else:
+        await q.edit_message_text(f"Заявка №{ticket.ticket_num}\nТема: {context.user_data['ticket_theme']}\n")
+        msg = await context.bot.send_message(
+            q.message.chat_id,
+            "Введіть текст звернення:",
+            reply_markup=CANCEL_KB,
+        )
     context.user_data["prompt_msg_id"] = msg.message_id
     return MESSAGE
 
@@ -209,18 +395,22 @@ async def get_message(update, context):
     context.user_data["message"] = update.message.text
     await delete_user_msg(update)
 
+
     prompt_msg_id = context.user_data.get("prompt_msg_id")
     if prompt_msg_id:
         try:
             await context.bot.delete_message(chat_id=update.effective_chat.id, message_id=prompt_msg_id)
         except BadRequest:
             pass
+        context.user_data["prompt_msg_id"] = None
 
-    await _remove_keyboard(context, update.effective_chat.id)
+    if update.effective_chat.type == "private":
+        await _remove_keyboard(context, update.effective_chat.id)
 
     kb = InlineKeyboardMarkup([
         [InlineKeyboardButton("Відправити", callback_data="send")],
-        [InlineKeyboardButton("Скасувати", callback_data="cancel")],
+        [InlineKeyboardButton("Редагувати", callback_data="edit_msg")],
+        [InlineKeyboardButton("Скасувати", callback_data="cancel_cmd")],
     ])
     text = (
         f"Номер заявки: {context.user_data['ticket_num']}\n\n"
@@ -228,19 +418,38 @@ async def get_message(update, context):
         f"Повідомлення: {context.user_data['message']}\n\n"
         f"Відправити?"
     )
+    if update.effective_chat.type != "private":
+        text = f"@{update.effective_user.username or update.effective_user.first_name}, {text}"
+        
     await step(update, context, text, kb)
     return CONFIRM
+
+async def edit_msg(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query
+    await q.answer()
+    
+    text = "Введіть новий текст звернення:"
+    if q.message.chat.type != "private":
+        text = f"@{update.effective_user.username or update.effective_user.first_name}, {text}"
+        cancel_inline = InlineKeyboardMarkup([[InlineKeyboardButton("❌ Скасувати", callback_data="cancel_cmd")]])
+        msg = await context.bot.send_message(q.message.chat_id, text, reply_markup=cancel_inline)
+    else:
+        msg = await context.bot.send_message(q.message.chat_id, text, reply_markup=CANCEL_KB)
+    
+    context.user_data["prompt_msg_id"] = msg.message_id
+    try:
+        await q.message.delete()
+    except BadRequest:
+        pass
+    
+    return MESSAGE
 
 async def confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
     await q.answer()
 
-    if q.data == "cancel":
-        await service.delete_ticket(context.user_data["ticket_id"])
-        await q.edit_message_text("Заявку скасовано")
-        context.user_data.clear()
-        await _restore_main_kb(context, q.message.chat_id, "Головне меню")
-        return ConversationHandler.END
+    if q.data == "cancel_cmd":
+        return await cancel_cmd(update, context)
 
     user = update.effective_user
     ticket = await service.finalize_ticket(
@@ -248,22 +457,34 @@ async def confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data["message"],
     )
 
-    await q.edit_message_text(f"Тікет {ticket.ticket_num} відправлено")
+    if q.message.chat.type == "private":
+        await q.edit_message_text(f"Тікет {ticket.ticket_num} відправлено")
+    else:
+        try:
+            await q.message.delete()
+        except BadRequest:
+            pass
 
-    url = f"https://t.me/{_bot_username}?start=addinfo_{ticket.ticket_num}"
-    kb = InlineKeyboardMarkup([[InlineKeyboardButton("Надіслати додаткову інформацію", url=url)]])
-
+    kb = InlineKeyboardMarkup([[InlineKeyboardButton("Відповісти", callback_data=f"pick_{ticket.id}")]])
     message_text = ticket.message or "(без тексту)"
-    await context.bot.send_message(
+    
+    status_ua = _status_ua(ticket.status)
+    
+    # In groups, we just drop the finalized ticket to the group
+    msg = await context.bot.send_message(
         context.user_data["group_chat_id"],
         f"🎫 Тікет #{ticket.ticket_num}\n\n"
         f"Тема: {context.user_data['ticket_theme']}\n"
+        f"Статус: {status_ua}\n"
         f"Від: @{user.username or user.first_name}\n"
         f"Повідомлення: {message_text}",
         reply_markup=kb
     )
+    await service.set_ticket_tg_message_id(ticket.id, msg.message_id)
+    
     context.user_data.clear()
-    await _restore_main_kb(context, q.message.chat_id, "Головне меню")
+    if q.message.chat.type == "private":
+        await _restore_main_kb(context, q.message.chat_id, "Головне меню")
     return ConversationHandler.END
 
 async def cancel_cmd(update, context):
@@ -274,14 +495,18 @@ async def cancel_cmd(update, context):
         reply_text = "Скасовано"
 
     chat_id = update.effective_chat.id
-    await delete_user_msg(update)
-    await _finish(context, chat_id, reply_text)
+    if update.message:
+        await delete_user_msg(update)
+    
+    if update.callback_query:
+        await update.callback_query.answer()
+        chat_id = update.callback_query.message.chat_id
 
+    await _finish(context, chat_id, reply_text if chat_id == update.effective_chat.id else None)
     context.user_data.clear()
     return ConversationHandler.END
 
 async def timeout_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Clean up orphan draft tickets when a conversation times out."""
     if "ticket_id" in context.user_data:
         await service.delete_ticket(context.user_data["ticket_id"])
 
@@ -293,6 +518,14 @@ async def timeout_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def my_tickets(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_chat.type != "private":
+        try:
+            msg = await update.message.reply_text("Ця команда доступна лише в приватних повідомленнях з ботом.")
+            # Optionally delete the warning msg after a while, or just leave it.
+        except BadRequest:
+            pass
+        return ConversationHandler.END
+
     if "ticket_id" in context.user_data:
         await service.delete_ticket(context.user_data["ticket_id"])
 
@@ -313,10 +546,12 @@ async def show_ticket_page(message_or_query, context):
     ticket_id = ticket_ids[idx]
     ticket = await service.get_ticket_by_id(ticket_id)
     theme = await service.get_theme_name(theme_id=ticket.theme_id)
+    status_ua = _status_ua(ticket.status)
 
     text = (
         f"Тікет {idx+1}/{len(ticket_ids)}: {ticket.ticket_num}"
         f"\nТема: {theme}"
+        f"\nСтатус: {status_ua}"
         f"\nПовідомлення: {ticket.message or '(без тексту)'}"
     )
 
@@ -365,37 +600,81 @@ async def pick_ticket(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ticket_id = int(q.data.split("_", 1)[1])
     ticket = await service.get_ticket_by_id(ticket_id)
     if not ticket:
-        await q.edit_message_text("Тікет не знайдено.")
+        if q.message.chat.type == "private":
+            await q.edit_message_text("Тікет не знайдено.")
+        else:
+            await context.bot.send_message(q.message.chat_id, "Тікет не знайдено.")
         return ConversationHandler.END
+
+    status_val = ticket.status.value if hasattr(ticket.status, "value") else ticket.status
+    if status_val == "closed":
+        if q.message.chat.type == "private":
+            await q.edit_message_text(f"Тікет #{ticket.ticket_num} закритий. Додавати відповіді заборонено.")
+            await _restore_main_kb(context, q.message.chat_id, "Головне меню")
+        else:
+            await context.bot.send_message(q.message.chat_id, f"@{update.effective_user.username or update.effective_user.first_name}, тікет #{ticket.ticket_num} закритий. Додавати відповіді заборонено.")
+        return ConversationHandler.END
+
     context.user_data["addinfo_id"] = ticket.id
     context.user_data["addinfo_num"] = ticket.ticket_num
-    context.user_data["bot_msg_id"] = q.message.message_id
-    await q.edit_message_text(f"Тікет: {ticket.ticket_num}")
-    msg = await context.bot.send_message(
-        q.message.chat_id,
-        "Введіть додаткову інформацію:",
-        reply_markup=CANCEL_KB,
-    )
-    context.user_data["prompt_msg_id"] = msg.message_id
+    context.user_data["reply_to_tg_msg_id"] = q.message.message_id
+    
+    chat_type = q.message.chat.type
+    if chat_type != "private":
+        cancel_inline = InlineKeyboardMarkup([[InlineKeyboardButton("❌ Скасувати", callback_data="cancel_cmd")]])
+        msg = await context.bot.send_message(
+            q.message.chat_id,
+            f"@{update.effective_user.username or update.effective_user.first_name}, введіть відповідь для тікету #{ticket.ticket_num}:",
+            reply_markup=cancel_inline,
+            reply_to_message_id=q.message.message_id
+        )
+        context.user_data["prompt_msg_id"] = msg.message_id
+    else:
+        context.user_data["bot_msg_id"] = q.message.message_id
+        await q.edit_message_text(f"Тікет: {ticket.ticket_num}")
+        msg = await context.bot.send_message(
+            q.message.chat_id,
+            "Введіть додаткову інформацію:",
+            reply_markup=CANCEL_KB,
+        )
+        context.user_data["prompt_msg_id"] = msg.message_id
     return ADDINFO
 
 conv = ConversationHandler(
     entry_points=[
         CommandHandler("start", start),
+        CommandHandler("support", support_cmd),
+        CallbackQueryHandler(support_cmd, pattern=r"^create_ticket$"),
         CommandHandler("mytickets", my_tickets),
         MessageHandler(MY_TICKETS_FILTER, my_tickets),
         CallbackQueryHandler(pick_ticket, pattern=r"^pick_"),
     ],
     states={
-        THEME: [CallbackQueryHandler(choose_theme, pattern=r"^theme_")],
-        MESSAGE: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_message)],
-        CONFIRM: [CallbackQueryHandler(confirm, pattern=r"^(send|cancel)$")],
+        THEME: [
+            CallbackQueryHandler(choose_theme, pattern=r"^theme_"),
+            CallbackQueryHandler(cancel_cmd, pattern=r"^cancel_cmd$")
+        ],
+        MESSAGE: [
+            MessageHandler(filters.TEXT & ~filters.COMMAND, get_message),
+            CallbackQueryHandler(cancel_cmd, pattern=r"^cancel_cmd$")
+        ],
+        CONFIRM: [
+            CallbackQueryHandler(confirm, pattern=r"^(send|cancel_cmd)$"),
+            CallbackQueryHandler(edit_msg, pattern=r"^edit_msg$")
+        ],
         ADDINFO_PICK: [
             CallbackQueryHandler(nav_ticket, pattern=r"^nav_"),
             CallbackQueryHandler(pick_ticket, pattern=r"^pick_"),
             CallbackQueryHandler(close_tickets, pattern=r"^close_tickets$"),
         ],
-        ADDINFO: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_addinfo)],
+        ADDINFO: [
+            MessageHandler(filters.TEXT & ~filters.COMMAND, get_addinfo),
+            CallbackQueryHandler(cancel_cmd, pattern=r"^cancel_cmd$")
+        ],
+        ADDINFO_CONFIRM: [
+            CallbackQueryHandler(confirm_reply, pattern=r"^(send_reply|cancel_cmd)$"),
+            CallbackQueryHandler(edit_reply, pattern=r"^edit_reply$")
+        ],
         ConversationHandler.TIMEOUT: [
             MessageHandler(filters.ALL, timeout_handler),
             CallbackQueryHandler(timeout_handler),
@@ -412,9 +691,15 @@ conv = ConversationHandler(
 
 async def post_init(application: Application) -> None:
     global _bot_username
-    #await create_tables()
     me = await application.bot.get_me()
     _bot_username = me.username
+
+    commands = [
+        BotCommand("support", "Звернутись у підтримку (лише в групах)"),
+        BotCommand("mytickets", "Мої тікети (лише в приватних повідомленнях)"),
+        BotCommand("cancel", "Скасувати поточну дію")
+    ]
+    await application.bot.set_my_commands(commands)
 
 
 def main():

@@ -1,4 +1,4 @@
-from datetime import datetime
+from src.schemas import UtcDatetime
 from pydantic import BaseModel, ConfigDict
 
 class NotificationOut(BaseModel):
@@ -9,4 +9,4 @@ class NotificationOut(BaseModel):
     type: str
     data: dict
     is_read: bool
-    created_at: datetime
+    created_at: UtcDatetime

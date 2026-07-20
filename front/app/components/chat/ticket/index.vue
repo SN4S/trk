@@ -1,6 +1,6 @@
 <template>
   <div class="ticket" @contextmenu.prevent="$emit('contextmenu', $event)">
-    <chat-ticket-status :status="ticket.status" />
+    <chat-ticket-status :status="ticket.status" :interactive="true" @update="changeStatus" />
     <p class="ticket_sender">{{ticket.soc_user_name}}</p>
     <p><span class="lable">Тема:</span> {{ ticket.theme?.name }}</p>
     <p class="ticket_number"><span class="lable">Номер звернення:</span> {{ticket.ticket_num}}</p>
@@ -26,14 +26,41 @@ const props = defineProps<{
 const formattedTimeCr = computed(() => {
   const s = props.ticket.created_at
   const d = new Date(s.endsWith('Z') || s.includes('+') ? s : s + 'Z')
-  return d.toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit' })
+  const now = new Date()
+  const isToday = d.getDate() === now.getDate() && 
+                  d.getMonth() === now.getMonth() && 
+                  d.getFullYear() === now.getFullYear()
+  const timeStr = d.toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit' })
+  if (isToday) return timeStr
+  return `${d.toLocaleDateString('uk-UA', { day: '2-digit', month: '2-digit', year: '2-digit' })} ${timeStr}`
 })
 const formattedTimeUpd = computed(() => {
   if (!props.ticket.updated_at) return '—'
   const s = props.ticket.updated_at
   const d = new Date(s.endsWith('Z') || s.includes('+') ? s : s + 'Z')
-  return d.toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit' })
+  const now = new Date()
+  const isToday = d.getDate() === now.getDate() && 
+                  d.getMonth() === now.getMonth() && 
+                  d.getFullYear() === now.getFullYear()
+  const timeStr = d.toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit' })
+  if (isToday) return timeStr
+  return `${d.toLocaleDateString('uk-UA', { day: '2-digit', month: '2-digit', year: '2-digit' })} ${timeStr}`
 })
+
+import { useApi } from '~/composables/useApi'
+const { apiFetch } = useApi()
+const { addToast } = useToast()
+
+async function changeStatus(newStatus: string) {
+  try {
+    await apiFetch(`/tickets/${props.ticket.id}`, {
+      method: 'PATCH',
+      body: { status: newStatus }
+    })
+  } catch (e: any) {
+    addToast({ title: 'Помилка', message: e?.data?.detail ?? 'Помилка оновлення статусу', type: 'error' })
+  }
+}
 </script>
 
 <style scoped>

@@ -27,6 +27,7 @@ class Ticket(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     updated_at: Mapped[datetime | None] = mapped_column(DateTime, onupdate=func.now(), nullable=True)
     status: Mapped[TicketStatus] = mapped_column(default=TicketStatus.OPEN)
+    tg_message_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
 
     theme: Mapped["Theme"] = relationship(back_populates="tickets")
     group: Mapped["Group"] = relationship(back_populates="tickets")

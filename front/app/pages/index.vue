@@ -1,33 +1,35 @@
 <template>
   <div class="chat_block" @click="closeMenu">
-    <div class="messageArea">
+    <div class="messageArea" ref="messageAreaRef" @scroll="handleScroll">
       <template v-for="item in feed" :key="`${item.type}-${item.id}`">
-        <chat-message v-if="item.type === 'reply'" :message="item.data" :is-me="item.data.user?.username==currentUser?.username">
-          <template #extra>
+        <chat-message v-if="item.type === 'reply'" :id="`reply-${item.data.id}`" :message="item.data" :is-me="item.data.user?.username === currentUser?.username" :is-group-mode="true" @contextmenu.prevent="openReplyMenu($event, item.data)">
+          <template #ticket_slot>
             <div class="parent-ticket-link">
-              <a :href="`#ticket-${item.data.ticket_id}`">↑ До тікету #{{ item.data.ticket?.ticket_num || item.data.ticket_id }}</a>
+              <a :href="`#ticket-${item.data.ticket_id}`">#{{ item.data.ticket?.ticket_num || item.data.ticket_id }}</a>
             </div>
           </template>
         </chat-message>
-        <chat-ticket 
-          v-else 
-          :id="`ticket-${item.data.id}`"
-          :ticket="item.data" 
-          @contextmenu="openTicketMenu($event, item.data)"
+        <chat-ticket
+            v-else
+            :id="`ticket-${item.data.id}`"
+            :ticket="item.data"
+            @contextmenu="openTicketMenu($event, item.data)"
         />
       </template>
 
       <div v-if="pending" class="state-msg">Завантаження…</div>
       <div v-else-if="error" class="state-msg error">{{ error }}</div>
       <div v-else-if="feed.length === 0" class="state-msg muted">Тікети не знайдені</div>
+
+      <div id="bottom"></div>
     </div>
     
     <message-input 
       v-model="messageText"
-      v-model:requiresClientReply="requiresClientReply"
       :replying-to-ticket="replyingToTicket"
+      :replying-to-message="replyingToReply ? { sender: replyingToReply.user?.username || replyingToReply.ticket?.soc_user_name || 'User', text: replyingToReply.message } : null"
       @send="sendMessage"
-      @cancel-reply="replyingToTicket = null"
+      @cancel-reply="cancelReply"
     />
 
     <!-- Context Menu for "Reply" -->
@@ -38,20 +40,20 @@
       @click.stop
     >
       <button 
+        v-if="menu.ticket?.status !== 'closed'"
         class="ctx-item"
         @click="setReplyTicket"
       >
         ↩ Відповісти
       </button>
-      <div class="ctx-divider"></div>
       <button 
         class="ctx-item"
-        @click="forwardToGeneralChat"
+        @click="forwardActiveItem"
       >
         ➦ В глобальний чат
       </button>
 
-      <template v-if="currentUser?.role === 'admin' || currentUser?.role === 'manager'">
+      <template v-if="menu.type === 'ticket' && (currentUser?.role === 'admin' || currentUser?.role === 'manager')">
         <div class="ctx-divider"></div>
         <div class="ctx-header">Призначити:</div>
         <form-select
@@ -64,11 +66,14 @@
         />
       </template>
     </div>
+
+    <button v-if="showGoDown" class="goDown" @click="scrollToSection">↓</button>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, nextTick, watch, onMounted } from 'vue'
+import { useRoute } from 'vue-router'
 import ChatMessage from '~/components/chat/message.vue'
 import MessageInput from '~/components/form/messageInput.vue'
 import { useTickets, type ApiTicket } from '~/composables/useTickets'
@@ -78,9 +83,11 @@ import { useRepliesG, type ApiReply } from '~/composables/useReplies'
 import { useApi } from '~/composables/useApi'
 import { useFilter } from '~/composables/useFilter'
 
+const route = useRoute()
 const { apiFetch } = useApi()
 const { filter } = useFilter()
 const { currentUser } = useAuth()
+const { addToast } = useToast()
 
 const users = ref<any[]>([])
 async function fetchUsers() {
@@ -93,6 +100,26 @@ async function fetchUsers() {
   }
 }
 onMounted(fetchUsers)
+
+// ── Scroll state ──────────────────────────────────────────────────────────
+const messageAreaRef = ref<HTMLElement | null>(null)
+
+const showGoDown = ref(false)
+const NEAR_BOTTOM_PX = 80
+
+function isNearBottom(el: HTMLElement) {
+  return el.scrollHeight - el.scrollTop - el.clientHeight < NEAR_BOTTOM_PX
+}
+
+function handleScroll() {
+  const el = messageAreaRef.value
+  if (!el) return
+  showGoDown.value = !isNearBottom(el)
+}
+
+function scrollToSection() {
+  document.getElementById('bottom')?.scrollIntoView({ behavior: 'smooth' })
+}
 
 // Fetch tickets not scoped to any group (global)
 const { tickets, pending: ticketsPending, error: ticketsError, fetchTickets } = useTickets()
@@ -119,7 +146,7 @@ const feed = computed<FeedItem[]>(() => {
         id: r.id,
         data: {
           ...r,
-          ticket: parentTicket ? { id: parentTicket.id, name: '', soc_user_name: parentTicket.soc_user_name, ticket_num: parentTicket.ticket_num } : null
+          ticket: parentTicket ? { id: parentTicket.id, name: '', soc_user_name: parentTicket.soc_user_name, ticket_num: parentTicket.ticket_num, message: parentTicket.message, theme: parentTicket.theme, status: parentTicket.status } : null
         } as any,
       }
     })
@@ -137,15 +164,11 @@ const feed = computed<FeedItem[]>(() => {
 const pending = computed(() => ticketsPending.value || repliesPending.value)
 const error = computed(() => ticketsError.value || repliesError.value)
 
-import { nextTick, watch, onMounted } from 'vue'
-import { useRoute } from 'vue-router'
-const route = useRoute()
-
 watch(pending, async (newVal) => {
-  if (!newVal) {
-    await nextTick()
-    scrollToHash()
-  }
+  if (newVal) return
+  await nextTick()
+  scrollToHash()
+  handleScroll()
 })
 
 watch(() => route.hash, () => {
@@ -154,33 +177,71 @@ watch(() => route.hash, () => {
 
 function scrollToHash() {
   if (route.hash) {
-    const el = document.querySelector(route.hash)
-    if (el) {
-      el.scrollIntoView({ behavior: 'smooth', block: 'center' })
-      el.classList.add('highlight-ticket')
-      setTimeout(() => el.classList.remove('highlight-ticket'), 2000)
+    const target = document.querySelector(route.hash)
+    if (target) {
+      target.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      target.classList.add('highlight-ticket')
+      setTimeout(() => target.classList.remove('highlight-ticket'), 2000)
     }
+  } else {
+    document.getElementById('bottom')?.scrollIntoView()
   }
 }
 
 // ── Messaging State & Logic ──────────────────────────────────────────────────
 const messageText = ref('')
 const replyingToTicket = ref<ApiTicket | null>(null)
+const replyingToReply = ref<ApiReply | null>(null)
+
+function cancelReply() {
+  replyingToTicket.value = null
+  replyingToReply.value = null
+}
 
 const menu = ref({
   show: false,
   x: 0,
   y: 0,
-  ticket: null as ApiTicket | null
+  type: null as 'ticket' | 'reply' | null,
+  ticket: null as ApiTicket | null,
+  reply: null as ApiReply | null
 })
 
-function openTicketMenu(e: MouseEvent, ticket: ApiTicket) {
-  menu.value = {
-    show: true,
-    x: e.clientX,
-    y: e.clientY,
-    ticket
+async function openTicketMenu(e: MouseEvent, ticket: ApiTicket) {
+  document.removeEventListener('click', closeMenu)
+  let x = e.clientX
+  let y = e.clientY
+  menu.value = { show: true, x, y, type: 'ticket', ticket, reply: null }
+  
+  await nextTick()
+  const menuEl = document.querySelector('.ctx-menu') as HTMLElement
+  if (menuEl) {
+    const rect = menuEl.getBoundingClientRect()
+    if (x + rect.width > window.innerWidth) x = window.innerWidth - rect.width - 10
+    if (y + rect.height > window.innerHeight) y = window.innerHeight - rect.height - 10
+    menu.value.x = x
+    menu.value.y = y
   }
+
+  document.addEventListener('click', closeMenu, { once: true })
+}
+
+async function openReplyMenu(e: MouseEvent, reply: any) {
+  document.removeEventListener('click', closeMenu)
+  let x = e.clientX
+  let y = e.clientY
+  menu.value = { show: true, x, y, type: 'reply', ticket: reply.ticket as ApiTicket, reply }
+  
+  await nextTick()
+  const menuEl = document.querySelector('.ctx-menu') as HTMLElement
+  if (menuEl) {
+    const rect = menuEl.getBoundingClientRect()
+    if (x + rect.width > window.innerWidth) x = window.innerWidth - rect.width - 10
+    if (y + rect.height > window.innerHeight) y = window.innerHeight - rect.height - 10
+    menu.value.x = x
+    menu.value.y = y
+  }
+
   document.addEventListener('click', closeMenu, { once: true })
 }
 
@@ -189,20 +250,27 @@ function closeMenu() {
 }
 
 function setReplyTicket() {
-  if (menu.value.ticket) {
+  if (menu.value.reply) {
+    replyingToReply.value = menu.value.reply
     replyingToTicket.value = menu.value.ticket
+  } else if (menu.value.ticket) {
+    replyingToTicket.value = menu.value.ticket
+    replyingToReply.value = null
   }
   closeMenu()
   document.getElementById('message-f')?.focus()
 }
 
-async function forwardToGeneralChat() {
-  if (!menu.value.ticket) return
+async function forwardActiveItem() {
   try {
-    await apiFetch(`/tickets/${menu.value.ticket.id}/forward`, { method: 'POST' })
-    alert("Успішно переслано у глобальний чат")
+    if (menu.value.type === 'ticket' && menu.value.ticket) {
+      await apiFetch(`/tickets/${menu.value.ticket.id}/forward`, { method: 'POST' })
+    } else if (menu.value.type === 'reply' && menu.value.reply) {
+      await apiFetch(`/tickets/${menu.value.reply.ticket_id}/replies/${menu.value.reply.id}/forward`, { method: 'POST' })
+    }
+    addToast({ title: 'Успіх', message: "Успішно переслано у глобальний чат", type: 'success' })
   } catch (e: any) {
-    alert(e?.data?.detail ?? 'Помилка пересилки')
+    addToast({ title: 'Помилка', message: e?.data?.detail ?? 'Помилка пересилки', type: 'error' })
   } finally {
     closeMenu()
   }
@@ -217,17 +285,19 @@ async function assignTicket(userId: number | null) {
     })
     fetchTickets() // refresh tickets to reflect assignment
   } catch (e: any) {
-    alert(e?.data?.detail ?? 'Помилка призначення')
+    addToast({ title: 'Помилка', message: e?.data?.detail ?? 'Помилка призначення', type: 'error' })
   } finally {
     closeMenu()
   }
 }
 
-const requiresClientReply = ref(false)
-
 async function sendMessage() {
   if (!replyingToTicket.value) {
-    alert("Будь ласка, виберіть тікет для відповіді (натисніть правою кнопкою миші на тікет)")
+    addToast({ title: 'Увага', message: "Будь ласка, виберіть тікет або повідомлення для відповіді (натисніть правою кнопкою миші)", type: 'warning' })
+    return
+  }
+  if (replyingToTicket.value.status === 'closed') {
+    addToast({ title: 'Увага', message: "Неможливо відповісти на закритий тікет", type: 'warning' })
     return
   }
 
@@ -239,16 +309,18 @@ async function sendMessage() {
       body: {
         message: messageText.value,
         is_support: !isPrivate,
-        requires_client_reply: requiresClientReply.value
+        requires_client_reply: false,
+        reply_to_reply_id: replyingToReply.value?.id || null
       }
     })
     
     messageText.value = ''
     replyingToTicket.value = null
+    replyingToReply.value = null
     
     fetchReplies()
   } catch (e: any) {
-    alert(e?.data?.detail ?? 'Помилка надсилання повідомлення')
+    addToast({ title: 'Помилка', message: e?.data?.detail ?? 'Помилка надсилання повідомлення', type: 'error' })
   }
 }
 </script>
@@ -275,7 +347,7 @@ async function sendMessage() {
 .ctx-menu {
   position: fixed;
   background: var(--message-bg-color);
-  border: 1px solid var(--border-color);
+  border: var(--border);
   border-radius: 8px;
   padding: 6px 0;
   min-width: 140px;
@@ -299,7 +371,7 @@ async function sendMessage() {
 }
 .ctx-divider {
   height: 1px;
-  background: var(--border-color);
+  background: var(--border);
   margin: 4px 0;
 }
 .ctx-header {
@@ -311,7 +383,6 @@ async function sendMessage() {
 }
 
 .parent-ticket-link {
-  margin-top: 4px;
   font-size: 11px;
   opacity: 0.8;
 }
@@ -328,6 +399,25 @@ async function sendMessage() {
 
 .highlight-ticket {
   animation: highlight 2s ease-out;
+}
+
+.goDown {
+  position: absolute;
+  right: 20px;
+  bottom: 90px;
+  width: 50px;
+  height: 50px;
+  border-radius: 50%;
+  border: var(--border);
+  background: var(--message-bg-color);
+  color: var(--message-text-color);
+  font-size: 20px;
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.25);
+  z-index: 5;
+}
+.goDown:hover {
+  background: var(--nav-item-bg-hover-color);
 }
 
 @keyframes highlight {

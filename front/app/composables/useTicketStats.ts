@@ -8,10 +8,9 @@ export interface TicketStats {
 
 export function useTicketStats(groupId: MaybeRefOrGetter<number | null>) {
     const { apiFetch } = useApi()
-
-    const stats = ref<TicketStats | null>(null)
-    const pending = ref(false)
-    const error = ref<string | null>(null)
+    const stats = useState<TicketStats | null>(`ticket-stats:${toValue(groupId) ?? 'all'}`, () => null)
+    const pending = useState(`ticket-stats:pending:${toValue(groupId) ?? 'all'}`, () => false)
+    const error = useState<string | null>(`ticket-stats:error:${toValue(groupId) ?? 'all'}`, () => null)
 
     async function fetchStats() {
         pending.value = true

@@ -2,10 +2,10 @@
   <div class="chat_block" @click="closeMenu">
     <div class="messageArea" ref="messageAreaRef" @scroll="handleScroll">
       <template v-for="item in feed" :key="`${item.type}-${item.id}`">
-        <chat-message v-if="item.type === 'reply'" :message="item.data" :is-me="item.data.user?.username === currentUser?.username" @contextmenu.prevent="openReplyMenu($event, item.data)">
-          <template #extra>
+        <chat-message v-if="item.type === 'reply'" :id="`reply-${item.data.id}`" :message="item.data" :is-me="item.data.user?.username === currentUser?.username" :is-group-mode="true" @contextmenu.prevent="openReplyMenu($event, item.data)">
+          <template #ticket_slot>
             <div class="parent-ticket-link">
-              <a :href="`#ticket-${item.data.ticket_id}`">↑ До тікету #{{ item.data.ticket?.ticket_num || item.data.ticket_id }}</a>
+              <a :href="`#ticket-${item.data.ticket_id}`">#{{ item.data.ticket?.ticket_num || item.data.ticket_id }}</a>
             </div>
           </template>
         </chat-message>
@@ -26,16 +26,15 @@
     
     <message-input 
       v-model="messageText"
-      v-model:requiresClientReply="requiresClientReply"
       :replying-to-ticket="replyingToTicket"
+      :replying-to-message="replyingToReply ? { sender: replyingToReply.user?.username || replyingToReply.ticket?.soc_user_name || 'User', text: replyingToReply.message } : null"
       @send="sendMessage"
-      @cancel-reply="replyingToTicket = null"
+      @cancel-reply="cancelReply"
     />
 
     <!-- Context Menu for "Reply" -->
     <div v-if="menu.show" class="ctx-menu" :style="{ top: menu.y + 'px', left: menu.x + 'px' }" @click.stop>
-      <button v-if="menu.type === 'ticket'" class="ctx-item" @click="setReplyTicket">↩ Відповісти</button>
-      <div v-if="menu.type === 'ticket'" class="ctx-divider"></div>
+      <button v-if="menu.ticket?.status !== 'closed'" class="ctx-item" @click="setReplyTicket">↩ Відповісти</button>
       <button class="ctx-item" @click="forwardActiveItem">➦ В глобальний чат</button>
 
       <template v-if="menu.type === 'ticket' && (currentUser?.role === 'admin' || currentUser?.role === 'manager')">
@@ -69,6 +68,7 @@ import { useApi } from '~/composables/useApi'
 const route = useRoute()
 const { apiFetch } = useApi()
 const { currentUser } = useAuth()
+const { addToast } = useToast()
 
 const users = ref<any[]>([])
 async function fetchUsers() {
@@ -128,7 +128,7 @@ const feed = computed<FeedItem[]>(() => {
         id: r.id,
         data: {
           ...r,
-          ticket: parentTicket ? { id: parentTicket.id, name: '', soc_user_name: parentTicket.soc_user_name, ticket_num: parentTicket.ticket_num } : null
+          ticket: parentTicket ? { id: parentTicket.id, name: '', soc_user_name: parentTicket.soc_user_name, ticket_num: parentTicket.ticket_num, message: parentTicket.message, theme: parentTicket.theme, status: parentTicket.status } : null
         } as any,
       }
   })
@@ -175,6 +175,12 @@ function scrollToHash() {
 // ── Messaging State & Logic ──────────────────────────────────────────────────
 const messageText = ref('')
 const replyingToTicket = ref<ApiTicket | null>(null)
+const replyingToReply = ref<ApiReply | null>(null)
+
+function cancelReply() {
+  replyingToTicket.value = null
+  replyingToReply.value = null
+}
 
 const menu = ref({
   show: false,
@@ -185,15 +191,41 @@ const menu = ref({
   reply: null as ApiReply | null,
 })
 
-function openTicketMenu(e: MouseEvent, ticket: ApiTicket) {
+async function openTicketMenu(e: MouseEvent, ticket: ApiTicket) {
   document.removeEventListener('click', closeMenu)
-  menu.value = { show: true, x: e.clientX, y: e.clientY, type: 'ticket', ticket, reply: null }
+  let x = e.clientX
+  let y = e.clientY
+  menu.value = { show: true, x, y, type: 'ticket', ticket, reply: null }
+  
+  await nextTick()
+  const menuEl = document.querySelector('.ctx-menu') as HTMLElement
+  if (menuEl) {
+    const rect = menuEl.getBoundingClientRect()
+    if (x + rect.width > window.innerWidth) x = window.innerWidth - rect.width - 10
+    if (y + rect.height > window.innerHeight) y = window.innerHeight - rect.height - 10
+    menu.value.x = x
+    menu.value.y = y
+  }
+
   document.addEventListener('click', closeMenu, { once: true })
 }
 
-function openReplyMenu(e: MouseEvent, reply: ApiReply) {
+async function openReplyMenu(e: MouseEvent, reply: any) {
   document.removeEventListener('click', closeMenu)
-  menu.value = { show: true, x: e.clientX, y: e.clientY, type: 'reply', ticket: null, reply }
+  let x = e.clientX
+  let y = e.clientY
+  menu.value = { show: true, x, y, type: 'reply', ticket: reply.ticket as ApiTicket, reply }
+  
+  await nextTick()
+  const menuEl = document.querySelector('.ctx-menu') as HTMLElement
+  if (menuEl) {
+    const rect = menuEl.getBoundingClientRect()
+    if (x + rect.width > window.innerWidth) x = window.innerWidth - rect.width - 10
+    if (y + rect.height > window.innerHeight) y = window.innerHeight - rect.height - 10
+    menu.value.x = x
+    menu.value.y = y
+  }
+
   document.addEventListener('click', closeMenu, { once: true })
 }
 
@@ -202,8 +234,12 @@ function closeMenu() {
 }
 
 function setReplyTicket() {
-  if (menu.value.ticket) {
+  if (menu.value.reply) {
+    replyingToReply.value = menu.value.reply
     replyingToTicket.value = menu.value.ticket
+  } else if (menu.value.ticket) {
+    replyingToTicket.value = menu.value.ticket
+    replyingToReply.value = null
   }
   closeMenu()
   // Focus the input
@@ -217,9 +253,9 @@ async function forwardActiveItem() {
     } else if (menu.value.type === 'reply' && menu.value.reply) {
       await apiFetch(`/tickets/${menu.value.reply.ticket_id}/replies/${menu.value.reply.id}/forward`, { method: 'POST' })
     }
-    alert("Успішно переслано у глобальний чат")
+    addToast({ title: 'Успіх', message: "Успішно переслано у глобальний чат", type: 'success' })
   } catch (e: any) {
-    alert(e?.data?.detail ?? 'Помилка пересилки')
+    addToast({ title: 'Помилка', message: e?.data?.detail ?? 'Помилка пересилки', type: 'error' })
   } finally {
     closeMenu()
   }
@@ -234,17 +270,19 @@ async function assignTicket(userId: number | null) {
     })
     fetchTickets() // refresh tickets to reflect assignment
   } catch (e: any) {
-    alert(e?.data?.detail ?? 'Помилка призначення')
+    addToast({ title: 'Помилка', message: e?.data?.detail ?? 'Помилка призначення', type: 'error' })
   } finally {
     closeMenu()
   }
 }
 
-const requiresClientReply = ref(false)
-
 async function sendMessage() {
   if (!replyingToTicket.value) {
-    alert("Будь ласка, виберіть тікет для відповіді (натисніть правою кнопкою миші на тікет)")
+    addToast({ title: 'Увага', message: "Будь ласка, виберіть тікет для відповіді (натисніть правою кнопкою миші на тікет)", type: 'warning' })
+    return
+  }
+  if (replyingToTicket.value.status === 'closed') {
+    addToast({ title: 'Увага', message: "Неможливо відповісти на закритий тікет", type: 'warning' })
     return
   }
 
@@ -254,19 +292,20 @@ async function sendMessage() {
       body: {
         message: messageText.value,
         is_support: true,
-        requires_client_reply: requiresClientReply.value
+        requires_client_reply: false,
+        reply_to_reply_id: replyingToReply.value?.id || null
       }
     })
 
     // Clear the input and state
     messageText.value = ''
     replyingToTicket.value = null
-    requiresClientReply.value = false
+    replyingToReply.value = null
 
     // Refresh the feed
     fetchReplies()
   } catch (e: any) {
-    alert(e?.data?.detail ?? 'Помилка надсилання повідомлення')
+    addToast({ title: 'Помилка', message: e?.data?.detail ?? 'Помилка надсилання повідомлення', type: 'error' })
   }
 }
 
@@ -330,7 +369,6 @@ async function sendMessage() {
 }
 
 .parent-ticket-link {
-  margin-top: 4px;
   font-size: 11px;
   opacity: 0.8;
 }
