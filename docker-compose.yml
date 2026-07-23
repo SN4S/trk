@@ -10,8 +10,7 @@ services:
       MYSQL_DATABASE: xpro_support_db
       MYSQL_USER: xpro
       MYSQL_PASSWORD: rootpassword
-    ports:
-      - "3306:3306"
+    # port not exposed — only accessible within docker network
     volumes:
       - db_data:/var/lib/mysql
     healthcheck:
@@ -38,14 +37,22 @@ services:
       dockerfile: Dockerfile
     container_name: xpro_api
     restart: unless-stopped
-    ports:
-      - "8000:8000"
-    env_file:
-      - ./api/.env
+    # port not exposed — nginx proxies to api:8000
     environment:
-      # Override DB URL to use the internal Docker network hostname
       - DATABASE_URL=mysql+aiomysql://root:rootpassword@db:3306/xpro_support_db
-      - CORS_ORIGINS=http://localhost:3000
+      - CORS_ORIGINS=*
+      - AUTH_JWT_SECRET=your-secret-key-here
+      - AUTH_JWT_ALG=HS256
+      - AUTH_JWT_EXP_MINUTES=15
+      - AUTH_REFRESH_TOKEN_KEY=your-secret-secret-key-here
+      - AUTH_REFRESH_TOKEN_EXP=30d
+      - AUTH_SECURE_COOKIES=true
+      - TG_BOT_TOKEN=
+      - INTERNAL_API_SECRET=change-this-to-a-random-secret-string
+      - MAX_UPLOAD_SIZE_MB=20
+    volumes:
+      - api_uploads:/app/uploads
+      - vapid_keys:/app/keys
     depends_on:
       db:
         condition: service_healthy
@@ -56,12 +63,11 @@ services:
       dockerfile: Dockerfile
     container_name: xpro_bot
     restart: unless-stopped
-    env_file:
-      - ./bot/.env
     environment:
-      # Override to use internal Docker network hostname
       - DATABASE_URL=mysql+aiomysql://root:rootpassword@db:3306/xpro_support_db
       - API_URL=http://api:8000
+      - TG_BOT_TOKEN=
+      - INTERNAL_API_SECRET=change-this-to-a-random-secret-string
     depends_on:
       db:
         condition: service_healthy
@@ -74,10 +80,27 @@ services:
       dockerfile: Dockerfile
     container_name: xpro_front
     restart: unless-stopped
-    ports:
-      - "3000:3000"
+    # port not exposed — nginx proxies to front:3000
+    environment:
+      - NODE_ENV=production
+      - NUXT_API_TARGET=http://api:8000
+      - NUXT_PUBLIC_API_BASE=https://xpro.sn4s.pp.ua
     depends_on:
+      - api
+
+  nginx:
+    build:
+      context: ./nginx
+      dockerfile: Dockerfile
+    container_name: xpro_nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    depends_on:
+      - front
       - api
 
 volumes:
   db_data:
+  api_uploads:
+  vapid_keys:
