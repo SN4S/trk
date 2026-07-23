@@ -28,11 +28,11 @@ router = APIRouter(
     description="Returns all groups, optionally filtered by name substring.",
 )
 async def list_groups(
-    _: CurrentUser,
+    user: CurrentUser,
     db: Annotated[AsyncSession, Depends(get_db)],
     search: str | None = Query(default=None, min_length=1, max_length=200, description="Search groups by name"),
 ):
-    return await service.get_all(db, search=search)
+    return await service.get_all(db, search=search, user_id=user.id)
 
 
 @router.post("/", response_model=GroupOut, status_code=status.HTTP_201_CREATED)
@@ -91,6 +91,7 @@ async def get_group_replies(
     theme_id: int | None = Query(default=None, description="Filter by parent ticket theme ID"),
     assigned_to_id: int | None = Query(default=None, description="Filter by assigned user ID"),
     assigned_by_id: int | None = Query(default=None, description="Filter by user who made the assignment"),
+    unassigned: bool | None = Query(default=None, description="Filter replies belonging to unassigned tickets"),
 ):
     group = await service.get_by_id(db, group_id)
     if group is None:
@@ -105,6 +106,7 @@ async def get_group_replies(
         theme_id=theme_id,
         assigned_to_id=assigned_to_id,
         assigned_by_id=assigned_by_id,
+        unassigned=unassigned,
     )
 
 
@@ -133,3 +135,15 @@ async def remove_user(
     success = await service.remove_user_from_group(db, group_id, user_id)
     if not success:
         raise HTTPException(status_code=404, detail="Access record not found")
+
+
+@router.post("/{group_id}/read", status_code=status.HTTP_204_NO_CONTENT)
+async def mark_group_read(
+    group_id: int,
+    user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    group = await service.get_by_id(db, group_id)
+    if group is None:
+        raise GroupNotFound()
+    await service.mark_read(db, group_id, user.id)

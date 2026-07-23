@@ -1,4 +1,6 @@
-from sqlalchemy import Column, Integer, String, ForeignKey, BigInteger, Boolean
+from datetime import datetime
+
+from sqlalchemy import Column, Integer, String, ForeignKey, BigInteger, Boolean, UniqueConstraint, DateTime, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from src.database import Base
@@ -26,3 +28,12 @@ class UserGroupAccess(Base):
 
     user: Mapped["User"] = relationship()
     group: Mapped["Group"] = relationship(back_populates="users_access")
+
+class GroupReadState(Base):
+    __tablename__ = "group_read_state"
+    __table_args__ = (UniqueConstraint("user_id", "group_id", name="uq_group_read_state_user_group"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("user.id", ondelete="CASCADE"))
+    group_id: Mapped[int] = mapped_column(ForeignKey("group.id", ondelete="CASCADE"))
+    last_read_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())

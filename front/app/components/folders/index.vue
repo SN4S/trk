@@ -1,4 +1,5 @@
 <template>
+  <!-- Start Folders -->
   <div class="foldersBlock">
     <folders-item
         v-for="folder in store.folders"
@@ -8,11 +9,12 @@
         @click="setActiveFolder(folder.id)"
         @delete="onDelete(folder.id)"
     />
-
     <button class="add-btn" title="Нова папка" @click="creating = true">+</button>
   </div>
-
+  <!-- / Folders -->
+<!-- Start Form -->
   <form-popup v-model="creating" title="Створити нову папку" @opened="focusInput">
+    <!-- Start Plus -->
     <input
         ref="inputRef"
         v-model="newFolderName"
@@ -21,12 +23,15 @@
         maxlength="64"
         @keydown.enter="submitCreate"
     />
-
+    <!-- /* Plus -->
+    <!-- Start Close -->
     <template #footer="{ close }">
       <button class="create-cancel" @click="close">Скасувати</button>
       <button class="create-confirm" @click="submitCreate">Створити</button>
     </template>
+    <!-- / Close -->
   </form-popup>
+<!-- / Form -->
 </template>
 
 <script setup lang="ts">
@@ -85,21 +90,22 @@ onMounted(fetchFolders)
 }
 
 .add-btn {
-  width: 26px;
-  height: 26px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  flex-shrink: 0;
+  height: 20px;
+  width: 20px;
+  line-height: 1;
+  font-size: 16px;
+  color: var(--message-time-color);
+  cursor: pointer;
   border-radius: 50%;
   border: 1px dashed var(--message-time-color);
   background: none;
-  color: var(--message-time-color);
-  font-size: 16px;
-  line-height: 1;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
   transition: border-color 0.2s, color 0.2s;
 }
+
 .add-btn:hover {
   border-color: var(--accent);
   color: var(--accent);
@@ -126,8 +132,21 @@ onMounted(fetchFolders)
   border-radius: 6px;
   transition: background 0.15s;
 }
-.create-confirm { background:var(--accent); color: white }
-.create-confirm:hover { opacity: 0.85; }
-.create-cancel { background: none; color: var(--message-text-color); }
-.create-cancel:hover { background: var(--danger); }
+.create-confirm { 
+  color: white;
+  background:var(--accent); 
+}
+
+.create-confirm:hover { 
+  opacity: 0.85;
+}
+
+.create-cancel { 
+  color: var(--message-text-color); 
+  background: none; 
+}
+
+.create-cancel:hover { 
+  background: var(--danger); 
+  }
 </style>

@@ -1,5 +1,5 @@
 <template>
-  <div class="ticket" @contextmenu.prevent="$emit('contextmenu', $event)">
+  <div class="ticket">
     <chat-ticket-status :status="ticket.status" :interactive="true" @update="changeStatus" />
     <p class="ticket_sender">{{ticket.soc_user_name}}</p>
     <p><span class="lable">Тема:</span> {{ ticket.theme?.name }}</p>
@@ -11,13 +11,31 @@
       <span class="ticket_assigned_by"> (ким: {{ ticket.current_assignment.assigned_by.username }})</span>
     </p>
     <p class="ticket_text"><span class="lable">Повідомлення:</span> {{ ticket.message }}</p>
+
+    <div v-if="ticket.attachments && ticket.attachments.length > 0" class="attachments-list">
+      <template v-for="att in ticket.attachments" :key="att.id">
+        <a v-if="att.content_type.startsWith('image/')" :href="baseURL + att.file_url" target="_blank" class="attachment-img-link">
+          <img :src="baseURL + att.file_url" :alt="att.filename" class="attachment-img" />
+        </a>
+        <a v-else :href="baseURL + att.file_url" target="_blank" class="attachment-file-link">
+          📎 {{ att.filename }}
+        </a>
+      </template>
+    </div>
+
     <span class="ticket_date">{{ formattedTimeCr }}</span>
+    <div class="controls msg-controls">
+      <slot name="controls">
+
+      </slot>
+    </div>
   </div>
 </template>
 
 <script setup lang="ts">
 import { computed } from 'vue'
 import type { ApiTicket } from '~/composables/useTickets'
+const baseURL = useRuntimeConfig().public.apiBase as string
 
 const props = defineProps<{
   ticket: ApiTicket
@@ -94,15 +112,75 @@ async function changeStatus(newStatus: string) {
   display: block;
   font-size: 11px;
   color: var(--message-time-color);
+  user-select: none;
   margin-top: 4px;
   align-self: flex-end;
 }
+
+.attachments-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+.attachment-img-link {
+  display: block;
+  max-width: 200px;
+  border-radius: 4px;
+  overflow: hidden;
+}
+.attachment-img {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+.attachment-file-link {
+  display: inline-block;
+  padding: 4px 8px;
+  background: rgba(0, 0, 0, 0.05);
+  border-radius: 4px;
+  font-size: 12px;
+  text-decoration: none;
+  color: var(--message-text-color);
+}
+.attachment-file-link:hover {
+  text-decoration: underline;
+}
+
 .lable{
   font-weight: 500;
 }
 .ticket_assigned_by {
   font-size: 11px;
   opacity: 0.6;
+}
+
+.msg-controls {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+  flex-wrap: wrap;
+  opacity: 0.7;
+}
+
+:deep(.control-btn) {
+  box-sizing: border-box;
+  height: 24px;
+  padding: 0 8px;
+  font-size: 11px;
+  line-height: 22px;
+  border-radius: var(--radius);
+  background: var(--nav-bar-bg);
+  color: var(--message-text-color);
+  border: var(--border);
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+:deep(.control-btn:hover) {
+  background: var(--accent);
+  color: white;
+  border-color: var(--accent);
 }
 
 </style>

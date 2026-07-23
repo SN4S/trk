@@ -93,6 +93,10 @@ function getNotificationTitle(notif: ApiNotification) {
     return ticketNum ? `Тікет - ${ticketNum}` : 'Призначення тікета'
   }
 
+  if (notif.type === 'status_change') {
+    return ticketNum ? `Тікет - ${ticketNum}` : 'Зміна статусу'
+  }
+
   if (notif.type === 'new_general_message') return 'Загальний чат'
   
   if (groupName) {
@@ -103,7 +107,7 @@ function getNotificationTitle(notif: ApiNotification) {
 }
 
 function getNotificationTheme(notif: ApiNotification) {
-  if (notif.type === 'new_ticket' || notif.type === 'new_reply') {
+  if (notif.type === 'new_ticket' || notif.type === 'new_reply' || notif.type === 'status_change') {
     return notif.data?.theme?.name || notif.data?.theme_name || notif.data?.ticket?.theme?.name || null
   }
   return null
@@ -113,7 +117,7 @@ function getNotificationDesc(notif: ApiNotification) {
   if (notif.type === 'new_ticket') {
     return `Новий тікет: ${notif.data?.message || ''}`
   }
-  if (notif.type === 'update_ticket') {
+  if (notif.type === 'status_change' || notif.type === 'update_ticket') {
     const statusMap: Record<string, string> = {
       open: 'відкритий',
       pending: 'в роботі',
@@ -157,7 +161,7 @@ async function handleNotificationClick(notif: ApiNotification) {
     } else {
        router.push(`/#reply-${notif.data?.id || ''}`)
     }
-  } else if (['new_ticket', 'update_ticket', 'assign_ticket'].includes(notif.type)) {
+  } else if (['new_ticket', 'update_ticket', 'assign_ticket', 'status_change'].includes(notif.type)) {
     const ticketId = notif.data?.id
     if (notif.data?.group_id) {
        router.push(`/group/${notif.data.group_id}#ticket-${ticketId}`)

@@ -18,6 +18,7 @@ from src.themes.models import Theme
 from src.groups.models import Group
 from src.replies.models import Reply
 from src.tickets.models import Ticket
+from src.attachments.models import Attachment
 
 
 # this is the Alembic Config object, which provides

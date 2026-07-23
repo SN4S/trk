@@ -21,3 +21,7 @@ class Reply(Base):
     ticket: Mapped["Ticket"] = relationship(back_populates="replies")
     user: Mapped["User | None"] = relationship(back_populates="replies")
     parent_reply: Mapped["Reply | None"] = relationship(remote_side=[id])
+    attachments: Mapped[list["Attachment"]] = relationship(
+        back_populates="reply",
+        cascade="all, delete-orphan"
+    )

@@ -4,6 +4,7 @@ export interface ApiGroup {
     tg_group_id: number | null
     last_message?: string | null
     last_time?: Date | null
+    unread_count?: number
 }
 
 export function useGroups() {
@@ -37,10 +38,12 @@ export function useGroups() {
     onMounted(() => {
         fetchGroups()
         subscribe('new_ticket', onNewTicket)
+        subscribe('new_reply', onNewTicket)
     })
 
     onUnmounted(() => {
         unsubscribe('new_ticket', onNewTicket)
+        unsubscribe('new_reply', onNewTicket)
     })
 
     return { groups, pending, error, fetchGroups }

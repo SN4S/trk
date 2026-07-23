@@ -24,7 +24,8 @@ async def get_by_ticket(db: AsyncSession, ticket_id: int, search: str | None = N
         .options(
             selectinload(Reply.user),
             selectinload(Reply.ticket),
-            selectinload(Reply.parent_reply).selectinload(Reply.user)
+            selectinload(Reply.parent_reply).selectinload(Reply.user),
+            selectinload(Reply.attachments)
         )
         .where(Reply.ticket_id == ticket_id)
         .order_by(Reply.created_at.asc())
@@ -44,6 +45,7 @@ async def get_all(
     assigned_to_id: int | None = None,
     assigned_by_id: int | None = None,
     group_id: int | None = None,
+    unassigned: bool | None = None,
 ) -> list[Reply]:
     from src.tickets.models import Ticket
     q = (
@@ -51,7 +53,8 @@ async def get_all(
         .options(
             selectinload(Reply.user), 
             selectinload(Reply.ticket),
-            selectinload(Reply.parent_reply).selectinload(Reply.user)
+            selectinload(Reply.parent_reply).selectinload(Reply.user),
+            selectinload(Reply.attachments)
         )
         .join(Reply.ticket)
         .order_by(Reply.created_at.asc())
@@ -62,8 +65,7 @@ async def get_all(
         q = q.where(Ticket.theme_id == theme_id)
     if group_id is not None:
         q = q.where(Ticket.group_id == group_id)
-    if assigned_to_id is not None:
-        # Latest assignment row for this ticket must point TO this user
+    if assigned_to_id is not None or unassigned:
         latest_for_ticket = (
             select(TicketAssignment.id)
             .where(TicketAssignment.ticket_id == Ticket.id)
@@ -72,12 +74,28 @@ async def get_all(
             .correlate(Ticket)
             .scalar_subquery()
         )
-        q = q.where(
-            select(TicketAssignment.id)
-            .where(TicketAssignment.id == latest_for_ticket)
-            .where(TicketAssignment.assigned_to_id == assigned_to_id)
-            .exists()
-        )
+        
+        conditions = []
+        if assigned_to_id is not None:
+            conditions.append(
+                select(TicketAssignment.id)
+                .where(TicketAssignment.id == latest_for_ticket)
+                .where(TicketAssignment.assigned_to_id == assigned_to_id)
+                .exists()
+            )
+        if unassigned:
+            conditions.append(
+                ~select(TicketAssignment.id)
+                .where(TicketAssignment.id == latest_for_ticket)
+                .where(TicketAssignment.assigned_to_id.isnot(None))
+                .exists()
+            )
+            
+        if len(conditions) == 1:
+            q = q.where(conditions[0])
+        elif len(conditions) > 1:
+            q = q.where(or_(*conditions))
+
     if assigned_by_id is not None:
         q = q.where(
             select(TicketAssignment.id)
@@ -104,7 +122,8 @@ async def get_by_id(db: AsyncSession, reply_id: int) -> Reply | None:
         select(Reply)
         .options(
             selectinload(Reply.user),
-            selectinload(Reply.parent_reply).selectinload(Reply.user)
+            selectinload(Reply.parent_reply).selectinload(Reply.user),
+            selectinload(Reply.attachments)
         )
         .where(Reply.id == reply_id)
         .execution_options(populate_existing=True)
@@ -119,6 +138,7 @@ async def create(
     is_support: bool,
     user_id: int | None,
     reply_to_reply_id: int | None = None,
+    attachment_ids: list[int] = None,
 ) -> Reply:
     from src.tickets.service import _encode_mentions
     if is_support:
@@ -131,6 +151,15 @@ async def create(
         reply_to_reply_id=reply_to_reply_id,
     )
     db.add(reply)
+    await db.flush()
+
+    if attachment_ids:
+        from src.attachments.models import Attachment
+        stmt = select(Attachment).where(Attachment.id.in_(attachment_ids))
+        attachments_res = await db.execute(stmt)
+        for attachment in attachments_res.scalars():
+            attachment.reply_id = reply.id
+
     await db.commit()
     created_reply = await get_by_id(db, reply.id)
     
@@ -167,15 +196,19 @@ async def create(
 
     await broadcast_event("new_reply", data)
     
-    if not is_support:
-        if assignee_id:
-            await notify_users(db, "new_reply", data, user_ids=[assignee_id])
-        else:
-            # If unassigned, notify all admins/managers
-            admins_managers_query = select(User.id).where(User.role.in_(["admin", "manager"]), User.is_active == True)
-            users_result = await db.execute(admins_managers_query)
-            admin_manager_ids = users_result.scalars().all()
-            await notify_users(db, "new_reply", data, user_ids=list(admin_manager_ids))
+    notify_user_ids = set()
+    if assignee_id:
+        notify_user_ids.add(assignee_id)
+        
+    admins_managers_query = select(User.id).where(User.role.in_(["admin", "manager"]), User.is_active == True)
+    users_result = await db.execute(admins_managers_query)
+    notify_user_ids.update(users_result.scalars().all())
+    
+    if user_id in notify_user_ids:
+        notify_user_ids.remove(user_id)
+    
+    if notify_user_ids:
+        await notify_users(db, "new_reply", data, user_ids=list(notify_user_ids))
         
     return created_reply
 
@@ -223,5 +256,38 @@ async def notify_client_reply(db: AsyncSession, reply_obj: Reply, ticket: Ticket
             if data.get("ok"):
                 reply_obj.tg_message_id = data["result"]["message_id"]
                 await db.commit()
+                
+                # Send attachments if any
+                if getattr(reply_obj, "attachments", None):
+                    import mimetypes
+                    for att in reply_obj.attachments:
+                        if not hasattr(att, "file_path") or not att.file_path:
+                            continue
+                            
+                        # Use sendPhoto for images, sendDocument for others
+                        is_photo = att.content_type.startswith("image/")
+                        method = "sendPhoto" if is_photo else "sendDocument"
+                        field_name = "photo" if is_photo else "document"
+                        
+                        try:
+                            with open(att.file_path, "rb") as f:
+                                file_data = f.read()
+                                
+                            att_payload = {
+                                "chat_id": str(chat_id),
+                                "reply_to_message_id": str(reply_obj.tg_message_id),
+                            }
+                            files = {
+                                field_name: (att.filename, file_data, att.content_type)
+                            }
+                            
+                            await client.post(
+                                f"https://api.telegram.org/bot{settings.TG_BOT_TOKEN}/{method}",
+                                data=att_payload,
+                                files=files
+                            )
+                        except Exception as e:
+                            logger.error(f"Failed to send attachment {att.id} to telegram: {e}")
+                            
     except httpx.HTTPError as exc:
         logger.warning("Telegram send failed for ticket %s: %s", ticket.id, exc)

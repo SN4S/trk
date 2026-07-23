@@ -3,7 +3,7 @@ from datetime import timezone
 from sqlalchemy import select, desc, func, case
 from sqlalchemy.orm import selectinload
 from database import models
-from database.models import Theme, Ticket, Reply, Group, User, TicketAssignment
+from database.models import Theme, Ticket, Reply, Group, User, TicketAssignment, Attachment
 import asyncio
 import httpx
 import os
@@ -61,7 +61,7 @@ async def reserve_ticket(group_chat_id: int, group_title: str, theme_id: int, so
         await session.refresh(ticket)
         return ticket
 
-async def finalize_ticket(ticket_id: int, message: str) -> Ticket:
+async def finalize_ticket(ticket_id: int, message: str, attachment_ids: list[int] | None = None) -> Ticket:
     async with models.async_session() as session:
         ticket_row = await session.execute(
             select(Ticket, Group.name.label("group_name"), Theme.name.label("theme_name"))
@@ -73,6 +73,24 @@ async def finalize_ticket(ticket_id: int, message: str) -> Ticket:
         if ticket_info:
             ticket, group_name, theme_name = ticket_info
             ticket.message = message
+            
+            attachments_data = []
+            if attachment_ids:
+                from sqlalchemy import update
+                await session.execute(
+                    update(Attachment)
+                    .where(Attachment.id.in_(attachment_ids))
+                    .values(ticket_id=ticket.id)
+                )
+                att_result = await session.execute(select(Attachment).where(Attachment.id.in_(attachment_ids)))
+                for att in att_result.scalars().all():
+                    attachments_data.append({
+                        "id": att.id,
+                        "filename": att.filename,
+                        "file_url": f"/{att.file_path}" if not att.file_path.startswith("/") else att.file_path,
+                        "content_type": att.content_type
+                    })
+            
             await session.commit()
             await session.refresh(ticket)
             asyncio.create_task(notify_api("new_ticket", {
@@ -86,6 +104,7 @@ async def finalize_ticket(ticket_id: int, message: str) -> Ticket:
                 "status": ticket.status.value if hasattr(ticket.status, "value") else ticket.status,
                 "group_name": group_name,
                 "theme_name": theme_name,
+                "attachments": attachments_data,
             }))
             return ticket
         return None
@@ -112,10 +131,29 @@ async def get_theme_name(theme_id: int) -> str | None:
         theme = await session.get(Theme, theme_id)
         return theme.name if theme else None
 
-async def add_reply(ticket_id: int, message: str, is_support: bool, user_id: int | None = None, tg_message_id: int | None = None, reply_to_reply_id: int | None = None) -> dict:
+async def add_reply(ticket_id: int, message: str, is_support: bool, user_id: int | None = None, tg_message_id: int | None = None, reply_to_reply_id: int | None = None, attachment_ids: list[int] | None = None) -> dict:
     async with models.async_session() as session:
         reply = Reply(ticket_id=ticket_id, message=message, is_support=is_support, user_id=user_id, tg_message_id=tg_message_id, reply_to_reply_id=reply_to_reply_id)
         session.add(reply)
+        await session.flush()
+        
+        attachments_data = []
+        if attachment_ids:
+            from sqlalchemy import update
+            await session.execute(
+                update(Attachment)
+                .where(Attachment.id.in_(attachment_ids))
+                .values(reply_id=reply.id)
+            )
+            att_result = await session.execute(select(Attachment).where(Attachment.id.in_(attachment_ids)))
+            for att in att_result.scalars().all():
+                attachments_data.append({
+                    "id": att.id,
+                    "filename": att.filename,
+                    "file_url": f"/{att.file_path}" if not att.file_path.startswith("/") else att.file_path,
+                    "content_type": att.content_type
+                })
+        
         await session.commit()
         await session.refresh(reply)
         
@@ -163,6 +201,7 @@ async def add_reply(ticket_id: int, message: str, is_support: bool, user_id: int
             "group_name": group_name,
             "theme_name": theme_name,
             "ticket_num": ticket_num,
+            "attachments": attachments_data,
         }
         if admin_name:
             data["user"] = {"id": user_id, "username": admin_name}

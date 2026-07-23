@@ -30,6 +30,7 @@ export interface ApiTicket {
     theme: { id: number; name: string } | null
     group: { id: number; name: string } | null
     current_assignment: ApiTicketAssignment | null
+    attachments?: { id: number; filename: string; file_url: string; content_type: string }[] | null
 }
 
 export function useTickets(groupId?: MaybeRef<number | null>) {
@@ -61,8 +62,9 @@ export function useTickets(groupId?: MaybeRef<number | null>) {
                 // Support: show tickets currently assigned TO me
                 params.assigned_to_id = currentUser.value.id
             } else if (role === 'admin' || role === 'manager') {
-                // Admin/Manager: show tickets I have assigned to someone
-                params.assigned_by_id = currentUser.value.id
+                // Admin/Manager: show unassigned tickets OR assigned to them
+                params.unassigned = true
+                params.assigned_to_id = currentUser.value.id
             }
         }
 

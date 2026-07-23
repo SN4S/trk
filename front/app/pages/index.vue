@@ -1,20 +1,34 @@
 <template>
-  <div class="chat_block" @click="closeMenu">
+  <div class="chat_block">
     <div class="messageArea" ref="messageAreaRef" @scroll="handleScroll">
       <template v-for="item in feed" :key="`${item.type}-${item.id}`">
-        <chat-message v-if="item.type === 'reply'" :id="`reply-${item.data.id}`" :message="item.data" :is-me="item.data.user?.username === currentUser?.username" :is-group-mode="true" @contextmenu.prevent="openReplyMenu($event, item.data)">
-          <template #ticket_slot>
-            <div class="parent-ticket-link">
-              <a :href="`#ticket-${item.data.ticket_id}`">#{{ item.data.ticket?.ticket_num || item.data.ticket_id }}</a>
-            </div>
-          </template>
-        </chat-message>
-        <chat-ticket
-            v-else
-            :id="`ticket-${item.data.id}`"
-            :ticket="item.data"
-            @contextmenu="openTicketMenu($event, item.data)"
-        />
+        <div class="massage_block" :style="`justify-content: ${item.data.user?.username === currentUser?.username ? 'end' : ''}`" v-if="item.type === 'reply'">
+          <chat-message  :id="`reply-${item.data.id}`" :message="item.data" :is-me="item.data.user?.username === currentUser?.username" :is-group-mode="true">
+            <template #ticket_slot>
+              <div class="parent-ticket-link">
+                <a :href="`#ticket-${item.data.ticket_id}`">#{{ item.data.ticket?.ticket_num || item.data.ticket_id }}</a>
+              </div>
+            </template>
+            <template #controls>
+                <button v-if="item.data.ticket?.status !== 'closed'" class="control-btn" @click="doReply(item.data.ticket, item.data)">↩ Відповісти</button>
+  <!--              <button class="control-btn" @click="doForward('reply', item.data.ticket_id, item.data.id)">➦ В глобальний чат</button>-->
+                <button v-if="currentUser?.role === 'admin' || currentUser?.role === 'manager'" class="control-btn" @click="doAssign(tickets.find(t => t.id === item.data.ticket_id)!, item.data)">Призначити</button>
+            </template>
+          </chat-message>
+        </div>
+        <div class="massage_block " v-else>
+          <chat-ticket
+              
+              :id="`ticket-${item.data.id}`"
+              :ticket="item.data"
+          >
+            <template #controls>
+                <button v-if="item.data.status !== 'closed'" class="control-btn" @click="doReply(item.data)">↩ Відповісти</button>
+  <!--              <button class="control-btn" @click="doForward('ticket', item.data.id)">➦ В глобальний чат</button>-->
+                <button v-if="currentUser?.role === 'admin' || currentUser?.role === 'manager'" class="control-btn" @click="doAssign(item.data)">Призначити</button>
+            </template>
+          </chat-ticket>
+        </div>
       </template>
 
       <div v-if="pending" class="state-msg">Завантаження…</div>
@@ -32,40 +46,16 @@
       @cancel-reply="cancelReply"
     />
 
-    <!-- Context Menu for "Reply" -->
-    <div 
-      v-if="menu.show" 
-      class="ctx-menu" 
-      :style="{ top: menu.y + 'px', left: menu.x + 'px' }"
-      @click.stop
-    >
-      <button 
-        v-if="menu.ticket?.status !== 'closed'"
-        class="ctx-item"
-        @click="setReplyTicket"
-      >
-        ↩ Відповісти
-      </button>
-      <button 
-        class="ctx-item"
-        @click="forwardActiveItem"
-      >
-        ➦ В глобальний чат
-      </button>
-
-      <template v-if="menu.type === 'ticket' && (currentUser?.role === 'admin' || currentUser?.role === 'manager')">
-        <div class="ctx-divider"></div>
-        <div class="ctx-header">Призначити:</div>
+    <form-popup v-model="assignPopup.show" title="Призначення тікета">
+      <div style="display: flex; flex-direction: column; gap: 16px;">
         <form-select
-          class="ctx-assign-select"
-          :model-value="menu.ticket?.current_assignment?.assigned_to?.id ?? null"
+          v-model="assignPopup.userId"
           :options="users.map(u => ({ value: u.id, label: u.username }))"
           placeholder="Нікому"
-          size="small"
-          @update:model-value="v => assignTicket(v || null)"
         />
-      </template>
-    </div>
+        <form-button @click="submitAssign">Призначити</form-button>
+      </div>
+    </form-popup>
 
     <button v-if="showGoDown" class="goDown" @click="scrollToSection">↓</button>
   </div>
@@ -198,100 +188,69 @@ function cancelReply() {
   replyingToReply.value = null
 }
 
-const menu = ref({
-  show: false,
-  x: 0,
-  y: 0,
-  type: null as 'ticket' | 'reply' | null,
-  ticket: null as ApiTicket | null,
-  reply: null as ApiReply | null
-})
-
-async function openTicketMenu(e: MouseEvent, ticket: ApiTicket) {
-  document.removeEventListener('click', closeMenu)
-  let x = e.clientX
-  let y = e.clientY
-  menu.value = { show: true, x, y, type: 'ticket', ticket, reply: null }
-  
-  await nextTick()
-  const menuEl = document.querySelector('.ctx-menu') as HTMLElement
-  if (menuEl) {
-    const rect = menuEl.getBoundingClientRect()
-    if (x + rect.width > window.innerWidth) x = window.innerWidth - rect.width - 10
-    if (y + rect.height > window.innerHeight) y = window.innerHeight - rect.height - 10
-    menu.value.x = x
-    menu.value.y = y
-  }
-
-  document.addEventListener('click', closeMenu, { once: true })
-}
-
-async function openReplyMenu(e: MouseEvent, reply: any) {
-  document.removeEventListener('click', closeMenu)
-  let x = e.clientX
-  let y = e.clientY
-  menu.value = { show: true, x, y, type: 'reply', ticket: reply.ticket as ApiTicket, reply }
-  
-  await nextTick()
-  const menuEl = document.querySelector('.ctx-menu') as HTMLElement
-  if (menuEl) {
-    const rect = menuEl.getBoundingClientRect()
-    if (x + rect.width > window.innerWidth) x = window.innerWidth - rect.width - 10
-    if (y + rect.height > window.innerHeight) y = window.innerHeight - rect.height - 10
-    menu.value.x = x
-    menu.value.y = y
-  }
-
-  document.addEventListener('click', closeMenu, { once: true })
-}
-
-function closeMenu() {
-  menu.value.show = false
-}
-
-function setReplyTicket() {
-  if (menu.value.reply) {
-    replyingToReply.value = menu.value.reply
-    replyingToTicket.value = menu.value.ticket
-  } else if (menu.value.ticket) {
-    replyingToTicket.value = menu.value.ticket
-    replyingToReply.value = null
-  }
-  closeMenu()
+function doReply(ticket: ApiTicket, reply?: ApiReply) {
+  replyingToTicket.value = ticket
+  replyingToReply.value = reply || null
   document.getElementById('message-f')?.focus()
 }
 
-async function forwardActiveItem() {
+async function doForward(type: 'ticket' | 'reply', ticketId: number, replyId?: number) {
   try {
-    if (menu.value.type === 'ticket' && menu.value.ticket) {
-      await apiFetch(`/tickets/${menu.value.ticket.id}/forward`, { method: 'POST' })
-    } else if (menu.value.type === 'reply' && menu.value.reply) {
-      await apiFetch(`/tickets/${menu.value.reply.ticket_id}/replies/${menu.value.reply.id}/forward`, { method: 'POST' })
+    if (type === 'ticket') {
+      await apiFetch(`/tickets/${ticketId}/forward`, { method: 'POST' })
+    } else if (type === 'reply') {
+      await apiFetch(`/tickets/${ticketId}/replies/${replyId}/forward`, { method: 'POST' })
     }
     addToast({ title: 'Успіх', message: "Успішно переслано у глобальний чат", type: 'success' })
   } catch (e: any) {
     addToast({ title: 'Помилка', message: e?.data?.detail ?? 'Помилка пересилки', type: 'error' })
-  } finally {
-    closeMenu()
   }
 }
 
-async function assignTicket(userId: number | null) {
-  if (!menu.value.ticket) return
+const assignPopup = ref({
+  show: false,
+  type: 'ticket' as 'ticket' | 'reply',
+  ticket: null as ApiTicket | null,
+  reply: null as ApiReply | null,
+  userId: null as number | null
+})
+
+function doAssign(ticket: ApiTicket, reply?: ApiReply) {
+  assignPopup.value.type = reply ? 'reply' : 'ticket'
+  assignPopup.value.ticket = ticket
+  assignPopup.value.reply = reply || null
+  assignPopup.value.userId = reply ? null : (ticket.current_assignment?.assigned_to?.id ?? null)
+  assignPopup.value.show = true
+}
+
+async function submitAssign() {
+  if (!assignPopup.value.ticket) return
   try {
-    await apiFetch(`/tickets/${menu.value.ticket.id}/assign`, { 
-      method: 'PATCH',
-      body: { user_id: userId }
-    })
-    fetchTickets() // refresh tickets to reflect assignment
+    if (assignPopup.value.type === 'ticket') {
+      await apiFetch(`/tickets/${assignPopup.value.ticket.id}/assign`, { 
+        method: 'PATCH',
+        body: { user_id: assignPopup.value.userId || null }
+      })
+      fetchTickets() // refresh tickets to reflect assignment
+    } else if (assignPopup.value.type === 'reply') {
+      if (!assignPopup.value.userId) {
+        addToast({ title: 'Увага', message: 'Оберіть користувача', type: 'warning' })
+        return
+      }
+      await apiFetch(`/tickets/${assignPopup.value.ticket.id}/replies/${assignPopup.value.reply!.id}/assign`, {
+        method: 'POST',
+        body: { user_id: assignPopup.value.userId }
+      })
+      addToast({ title: 'Успіх', message: "Успішно призначено у глобальний чат", type: 'success' })
+    }
+    assignPopup.value.show = false
   } catch (e: any) {
     addToast({ title: 'Помилка', message: e?.data?.detail ?? 'Помилка призначення', type: 'error' })
-  } finally {
-    closeMenu()
   }
 }
 
-async function sendMessage() {
+async function sendMessage(attachmentIds: number[] = []) {
+  if (!messageText.value.trim() && attachmentIds.length === 0) return
   if (!replyingToTicket.value) {
     addToast({ title: 'Увага', message: "Будь ласка, виберіть тікет або повідомлення для відповіді (натисніть правою кнопкою миші)", type: 'warning' })
     return
@@ -310,7 +269,8 @@ async function sendMessage() {
         message: messageText.value,
         is_support: !isPrivate,
         requires_client_reply: false,
-        reply_to_reply_id: replyingToReply.value?.id || null
+        reply_to_reply_id: replyingToReply.value?.id || null,
+        attachment_ids: attachmentIds
       }
     })
     
@@ -334,52 +294,26 @@ async function sendMessage() {
   position: relative;
 }
 
+.massage_block{
+  display: flex;
+}
+
+.right {
+  justify-content: end;
+}
+
 .messageArea {
   flex: 1;
   overflow-y: auto;
-  padding: 16px;
+  padding: 3rem;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 3rem;
 }
 
-/* Context Menu */
-.ctx-menu {
-  position: fixed;
-  background: var(--message-bg-color);
-  border: var(--border);
-  border-radius: 8px;
-  padding: 6px 0;
-  min-width: 140px;
-  box-shadow: 0 4px 12px rgba(0,0,0,0.2);
-  z-index: 9999;
-}
-.ctx-item {
+.messageLeft img {
   display: block;
   width: 100%;
-  text-align: left;
-  padding: 6px 16px;
-  background: none;
-  border: none;
-  color: var(--message-text-color);
-  font-size: 13px;
-  cursor: pointer;
-  transition: background 0.1s;
-}
-.ctx-item:hover {
-  background: var(--nav-item-bg-hover-color);
-}
-.ctx-divider {
-  height: 1px;
-  background: var(--border);
-  margin: 4px 0;
-}
-.ctx-header {
-  padding: 4px 16px;
-  font-size: 11px;
-  color: var(--message-time-color);
-  font-weight: bold;
-  text-transform: uppercase;
 }
 
 .parent-ticket-link {

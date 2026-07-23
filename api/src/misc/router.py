@@ -26,6 +26,7 @@ async def get_all_replies(
     theme_id: int | None = Query(default=None, description="Filter by parent ticket theme ID"),
     assigned_to_id: int | None = Query(default=None, description="Filter by parent ticket assigned user ID"),
     assigned_by_id: int | None = Query(default=None, description="Filter by user who made the assignment"),
+    unassigned: bool | None = Query(default=None, description="Filter replies belonging to unassigned tickets"),
 ):
     return await replies_service.get_all(
         db,
@@ -34,6 +35,7 @@ async def get_all_replies(
         theme_id=theme_id,
         assigned_to_id=assigned_to_id,
         assigned_by_id=assigned_by_id,
+        unassigned=unassigned,
     )
 
 @router.get("/stats", response_model=TicketStats)

@@ -7,14 +7,16 @@
     <div class="titleBlock">
       <span class="title">{{ folder.name }}</span>
     </div>
-    <div v-if="folder.groups?.length > 0" class="iconBlock">
-      <span class="number">{{ folder.groups.length }}</span>
+    <div v-if="unreadCount > 0" class="iconBlock">
+      <span class="number">{{ unreadCount > 99 ? '99+' : unreadCount }}</span>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
+import { computed } from 'vue'
 import type { ApiFolder } from '~/composables/useFolders'
+import { useGroups } from '~/composables/useGroups'
 
 const props = defineProps<{
   folder: ApiFolder
@@ -24,6 +26,16 @@ const props = defineProps<{
 const emit = defineEmits<{
   (e: 'delete'): void
 }>()
+
+const { groups } = useGroups()
+
+const unreadCount = computed(() => {
+  if (!props.folder.groups?.length) return 0
+  const idSet = new Set(props.folder.groups.map(g => g.id))
+  return groups.value
+    .filter(g => idSet.has(g.id))
+    .reduce((sum, g) => sum + (g.unread_count || 0), 0)
+})
 </script>
 
 <style scoped>

@@ -1,9 +1,9 @@
-from sqlalchemy import or_, and_, select
+from sqlalchemy import or_, and_, select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from src.themes.models import Theme
-from src.tickets.models import Ticket, TicketStatus, GeneralChatMessage, TicketAssignment
+from src.tickets.models import Ticket, TicketStatus, GeneralChatMessage, TicketAssignment, GeneralChatReadState
 from src.replies.models import Reply
 
 import re
@@ -21,7 +21,8 @@ def _ticket_options():
         selectinload(Ticket.group),
         selectinload(Ticket.assignments).selectinload(TicketAssignment.assigned_to),
         selectinload(Ticket.assignments).selectinload(TicketAssignment.assigned_by),
-        selectinload(Ticket.replies),
+        selectinload(Ticket.replies).selectinload(Reply.attachments),
+        selectinload(Ticket.attachments),
     ]
 
 
@@ -33,6 +34,7 @@ async def get_all(
     search: str | None = None,
     assigned_to_id: int | None = None,
     assigned_by_id: int | None = None,
+    unassigned: bool | None = None,
 ) -> list[Ticket]:
     q = (
         select(Ticket)
@@ -49,8 +51,8 @@ async def get_all(
     if theme_id is not None:
         q = q.where(Ticket.theme_id == theme_id)
 
-    if assigned_to_id is not None:
-        # Latest assignment row for this ticket must point TO this user
+    if assigned_to_id is not None or unassigned:
+        # Latest assignment row for this ticket
         latest_for_ticket = (
             select(TicketAssignment.id)
             .where(TicketAssignment.ticket_id == Ticket.id)
@@ -59,12 +61,27 @@ async def get_all(
             .correlate(Ticket)
             .scalar_subquery()
         )
-        q = q.where(
-            select(TicketAssignment.id)
-            .where(TicketAssignment.id == latest_for_ticket)
-            .where(TicketAssignment.assigned_to_id == assigned_to_id)
-            .exists()
-        )
+        
+        conditions = []
+        if assigned_to_id is not None:
+            conditions.append(
+                select(TicketAssignment.id)
+                .where(TicketAssignment.id == latest_for_ticket)
+                .where(TicketAssignment.assigned_to_id == assigned_to_id)
+                .exists()
+            )
+        if unassigned:
+            conditions.append(
+                ~select(TicketAssignment.id)
+                .where(TicketAssignment.id == latest_for_ticket)
+                .where(TicketAssignment.assigned_to_id.isnot(None))
+                .exists()
+            )
+            
+        if len(conditions) == 1:
+            q = q.where(conditions[0])
+        elif len(conditions) > 1:
+            q = q.where(or_(*conditions))
 
     if assigned_by_id is not None:
         # Any assignment row for this ticket was created BY this user
@@ -116,6 +133,7 @@ async def create(
     group_id: int,
     soc_user_id: int,
     message: str | None,
+    attachment_ids: list[int] = None,
 ) -> Ticket:
     ticket = Ticket(
         ticket_num=ticket_num,
@@ -126,6 +144,15 @@ async def create(
         status=TicketStatus.OPEN,
     )
     db.add(ticket)
+    await db.flush()
+    
+    if attachment_ids:
+        from src.attachments.models import Attachment
+        stmt = select(Attachment).where(Attachment.id.in_(attachment_ids))
+        attachments_res = await db.execute(stmt)
+        for attachment in attachments_res.scalars():
+            attachment.ticket_id = ticket.id
+
     await db.commit()
     
     created_ticket = await get_by_id(db, ticket.id)
@@ -148,14 +175,32 @@ async def update(db: AsyncSession, ticket: Ticket, data: dict) -> Ticket:
             setattr(ticket, field, value)
     await db.commit()
     
-    if "status" in data and data["status"] != old_status:
+    status_changed = "status" in data and data["status"] != old_status
+    
+    if status_changed:
         if ticket.tg_message_id and ticket.group and ticket.group.tg_group_id:
             await update_ticket_tg_message(db, ticket)
     elif any(k in data for k in ("theme_id", "message")) and ticket.tg_message_id and ticket.group and ticket.group.tg_group_id:
         await update_ticket_tg_message(db, ticket)
             
     updated_ticket = await get_by_id(db, ticket.id)
-    await broadcast_event("update_ticket", TicketOut.model_validate(updated_ticket).model_dump(mode="json"))
+    ticket_data = TicketOut.model_validate(updated_ticket).model_dump(mode="json")
+    await broadcast_event("update_ticket", ticket_data)
+    
+    if status_changed:
+        notify_user_ids = set()
+        
+        latest_assignment = updated_ticket.assignments[-1] if updated_ticket.assignments else None
+        if latest_assignment and latest_assignment.assigned_to_id:
+            notify_user_ids.add(latest_assignment.assigned_to_id)
+        
+        admins_managers_query = select(User.id).where(User.role.in_(["admin", "manager"]), User.is_active == True)
+        result = await db.execute(admins_managers_query)
+        notify_user_ids.update(result.scalars().all())
+        
+        if notify_user_ids:
+            await notify_users(db, "status_change", ticket_data, user_ids=list(notify_user_ids))
+            
     return updated_ticket
 
 async def update_ticket_tg_message(db: AsyncSession, ticket: Ticket):
@@ -173,11 +218,12 @@ async def update_ticket_tg_message(db: AsyncSession, ticket: Ticket):
     theme_name = ticket.theme.name if ticket.theme else "Невідомо"
     message_text = ticket.message or "(без тексту)"
     
+    sender_name = f"@{ticket.soc_user_name}" if " " not in ticket.soc_user_name and not ticket.soc_user_name.startswith("@") else ticket.soc_user_name
     text = (
         f"🎫 Тікет #{ticket.ticket_num}\n\n"
         f"Тема: {theme_name}\n"
         f"Статус: {status_ua}\n"
-        f"Від: @{ticket.soc_user_name}\n"
+        f"Від: {sender_name}\n"
         f"Повідомлення: {message_text}"
     )
     
@@ -231,7 +277,12 @@ async def assign(
             msg = f"Призначив(ла) тікет #{assigned_ticket.ticket_num} на @{assigned_user.username}"
             await forward_to_general_chat(db, ticket_id=ticket.id, user_id=assigned_by_id, message=msg)
             
-        await notify_users(db, "assign_ticket", data, user_ids=[user_id])
+        notify_user_ids = {user_id}
+        admins_managers_query = select(User.id).where(User.role.in_(["admin", "manager"]), User.is_active == True)
+        result = await db.execute(admins_managers_query)
+        notify_user_ids.update(result.scalars().all())
+        
+        await notify_users(db, "assign_ticket", data, user_ids=list(notify_user_ids))
         
     return assigned_ticket
 
@@ -287,10 +338,19 @@ async def _encode_mentions(db: AsyncSession, message: str) -> tuple[str, list[in
     return RAW_MENTION.sub(repl, message), list(lookup.values())
 
 
-async def create_general_chat_message(db: AsyncSession, user_id: int, message: str, parent_id: int | None = None) -> GeneralChatMessage:
+async def create_general_chat_message(db: AsyncSession, user_id: int, message: str, parent_id: int | None = None, attachment_ids: list[int] = None) -> GeneralChatMessage:
     message, mentioned_ids = await _encode_mentions(db, message)
     chat_message = GeneralChatMessage(user_id=user_id, message=message, parent_id=parent_id)
     db.add(chat_message)
+    await db.flush()
+    
+    if attachment_ids:
+        from src.attachments.models import Attachment
+        stmt = select(Attachment).where(Attachment.id.in_(attachment_ids))
+        attachments_res = await db.execute(stmt)
+        for attachment in attachments_res.scalars():
+            attachment.general_chat_message_id = chat_message.id
+            
     await db.commit()
     msg = await _get_general_chat_message(db, chat_message.id)
     
@@ -332,9 +392,12 @@ async def _get_general_chat_message(db: AsyncSession, message_id: int) -> Genera
             selectinload(GeneralChatMessage.ticket).selectinload(Ticket.group),
             selectinload(GeneralChatMessage.ticket).selectinload(Ticket.assignments).selectinload(TicketAssignment.assigned_to),
             selectinload(GeneralChatMessage.ticket).selectinload(Ticket.assignments).selectinload(TicketAssignment.assigned_by),
+            selectinload(GeneralChatMessage.ticket).selectinload(Ticket.attachments),
             selectinload(GeneralChatMessage.reply).selectinload(Reply.user),
             selectinload(GeneralChatMessage.reply).selectinload(Reply.parent_reply).selectinload(Reply.user),
+            selectinload(GeneralChatMessage.reply).selectinload(Reply.attachments),
             selectinload(GeneralChatMessage.parent).selectinload(GeneralChatMessage.user),
+            selectinload(GeneralChatMessage.attachments),
         )
         .where(GeneralChatMessage.id == message_id)
     )
@@ -350,10 +413,32 @@ async def get_general_chat_messages(db: AsyncSession) -> list[GeneralChatMessage
             selectinload(GeneralChatMessage.ticket).selectinload(Ticket.group),
             selectinload(GeneralChatMessage.ticket).selectinload(Ticket.assignments).selectinload(TicketAssignment.assigned_to),
             selectinload(GeneralChatMessage.ticket).selectinload(Ticket.assignments).selectinload(TicketAssignment.assigned_by),
+            selectinload(GeneralChatMessage.ticket).selectinload(Ticket.attachments),
             selectinload(GeneralChatMessage.reply).selectinload(Reply.user),
             selectinload(GeneralChatMessage.reply).selectinload(Reply.parent_reply).selectinload(Reply.user),
+            selectinload(GeneralChatMessage.reply).selectinload(Reply.attachments),
             selectinload(GeneralChatMessage.parent).selectinload(GeneralChatMessage.user),
+            selectinload(GeneralChatMessage.attachments),
         )
         .order_by(GeneralChatMessage.created_at.asc())
     )
     return list((await db.execute(q)).scalars().all())
+
+
+async def get_general_chat_unread_count(db: AsyncSession, user_id: int) -> int:
+    state = await db.scalar(select(GeneralChatReadState).where(GeneralChatReadState.user_id == user_id))
+    q = select(func.count(GeneralChatMessage.id))
+    if state and state.last_read_at:
+        q = q.where(GeneralChatMessage.created_at > state.last_read_at)
+    return await db.scalar(q) or 0
+
+
+async def mark_general_chat_read(db: AsyncSession, user_id: int) -> None:
+    from datetime import UTC, datetime
+    result = await db.execute(select(GeneralChatReadState).where(GeneralChatReadState.user_id == user_id))
+    state = result.scalar_one_or_none()
+    if state:
+        state.last_read_at = datetime.now(UTC)
+    else:
+        db.add(GeneralChatReadState(user_id=user_id))
+    await db.commit()

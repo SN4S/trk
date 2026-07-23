@@ -18,6 +18,7 @@ export function useNotifications() {
     const { apiFetch } = useApi()
     const { subscribe, unsubscribe } = useWebSocket()
     const { isLoggedIn } = useAuth()
+    const router = useRouter()
     const notifications = useState<ApiNotification[]>('notifications:list', () => [])
     const pending = useState('notifications:pending', () => false)
     const error = useState<string | null>('notifications:error', () => null)
@@ -61,7 +62,7 @@ export function useNotifications() {
                 const author = payload.data?.soc_user_name || 'Клієнт'
                 message = `Від ${author}: ${payload.data?.message || ''}`
                 hash = `ticket-${payload.data?.id}`
-            } else if (payload.type === 'update_ticket') {
+            } else if (payload.type === 'status_change') {
                 title = `Оновлено тікет #${payload.data?.ticket_num || ''}`
                 const status = payload.data?.status || 'оновлено'
                 message = `Статус змінено на: ${status}`
@@ -76,12 +77,12 @@ export function useNotifications() {
                 title = `Нова відповідь`
                 const author = payload.data?.user?.username || payload.data?.soc_user_name || 'Клієнт'
                 message = `${author}: ${payload.data?.message || ''}`
-                hash = `ticket-${payload.data?.ticket_id}`
+                hash = `reply-${payload.data?.id}`
             } else if (payload.type === 'new_general_message') {
                 title = `Загальний чат`
                 const author = payload.data?.user?.username || 'Колега'
                 message = `${author}: ${payload.data?.message || ''}`
-                hash = `msg-${payload.data?.id}`
+                hash = `reply-${payload.data?.id}` // General chat uses reply-id too!
                 routePath = '/general'
             }
 
@@ -91,22 +92,13 @@ export function useNotifications() {
                 message,
                 type: 'info',
                 onClick: async () => {
-                    const router = useRouter()
-                    if (routePath === '/general') {
-                        await router.push(`/general#${hash}`)
+                    const el = document.getElementById(hash)
+                    if (el) {
+                        el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+                        el.classList.add('highlight-ticket')
+                        setTimeout(() => el.classList.remove('highlight-ticket'), 2000)
                     } else {
-                        if (router.currentRoute.value.path === '/') {
-                            const el = document.getElementById(hash)
-                            if (el) {
-                                el.scrollIntoView({ behavior: 'smooth', block: 'center' })
-                                el.classList.add('highlight-ticket')
-                                setTimeout(() => el.classList.remove('highlight-ticket'), 2000)
-                            } else {
-                                await router.push(`/#${hash}`)
-                            }
-                        } else {
-                            await router.push(`/#${hash}`)
-                        }
+                        await router.push(`${routePath === '/' ? '' : routePath}/#${hash}`)
                     }
                 }
             })

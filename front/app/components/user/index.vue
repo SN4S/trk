@@ -51,7 +51,7 @@ onUnmounted(() => {
 }
 
 .userContainer {
-  border: var(--border);
+  /* border: var(--border); */
   border-radius: var(--radius);
   display: flex;
   flex-direction: row;

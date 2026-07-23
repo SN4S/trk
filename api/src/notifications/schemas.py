@@ -10,3 +10,13 @@ class NotificationOut(BaseModel):
     data: dict
     is_read: bool
     created_at: UtcDatetime
+
+
+class PushSubscriptionKeys(BaseModel):
+    p256dh: str
+    auth: str
+
+
+class PushSubscriptionIn(BaseModel):
+    endpoint: str
+    keys: PushSubscriptionKeys

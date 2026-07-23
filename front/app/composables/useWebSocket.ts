@@ -15,8 +15,16 @@ export function useWebSocket() {
         if (ws) return // already connected or connecting
         if (!accessToken.value) return // need auth
 
-        const baseURL = config.public.apiBase as string
-        const wsURL = baseURL.replace(/^http/, 'ws') + '/ws/updates?token=' + accessToken.value
+        const baseURL = useBaseUrl()
+        
+        let wsURL = ''
+        if (baseURL.startsWith('http')) {
+            wsURL = baseURL.replace(/^http/, 'ws') + '/ws/updates?token=' + accessToken.value
+        } else {
+            // fallback if it somehow is relative
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+            wsURL = `${protocol}//${window.location.host}${baseURL}/ws/updates?token=${accessToken.value}`
+        }
 
         ws = new WebSocket(wsURL)
 

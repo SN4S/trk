@@ -1,7 +1,7 @@
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import Depends,  HTTPException, status
+from fastapi import Depends,  HTTPException, status, Request
 from fastapi.security import OAuth2PasswordBearer
 from jwt.exceptions import ExpiredSignatureError, InvalidTokenError
 from sqlalchemy import select
@@ -11,6 +11,7 @@ from src.auth import utils
 from src.auth.exceptions import InactiveUser, InvalidToken, TokenExpired
 from src.auth.models import User
 from src.database import get_db
+from src.config import settings
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
 
@@ -42,6 +43,26 @@ async def get_current_user(
         raise InactiveUser()
 
     return user
+
+
+async def get_user_or_bot(
+    request: Request,
+    db: Annotated[AsyncSession, Depends(get_db)]
+) -> User | None:
+    bot_token = request.headers.get("X-Bot-Token")
+    if bot_token and bot_token == settings.INTERNAL_API_SECRET:
+        return None
+        
+    auth_header = request.headers.get("Authorization")
+    if auth_header and auth_header.startswith("Bearer "):
+        token = auth_header[7:]
+        try:
+            token_data = await parse_jwt_data(token)
+            return await get_current_user(token_data, db)
+        except Exception:
+            pass
+
+    raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
 
 
 CurrentUser = Annotated[User, Depends(get_current_user)]

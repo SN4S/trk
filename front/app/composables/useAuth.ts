@@ -20,8 +20,7 @@ let globalRefreshPromise: Promise<boolean> | null = null
 export function useAuth(){
     const accessToken = useState<string | null>('auth:accessToken', () => null)
     const currentUser = useState<UserOut | null>('auth:currentUser', () => null)
-    const config = useRuntimeConfig()
-    const baseURL = config.public.apiBase as string
+    const baseURL = useBaseUrl()
     const router = useRouter()
 
     const isLoggedIn = computed(() => accessToken.value !== null)

@@ -1,17 +1,11 @@
 // auth middleware
 export default defineNuxtRouteMiddleware(async (to) => {
-    const { isLoggedIn, init } = useAuth()
+        if (process.server) return // let SSR pass through, client will restore + redirect if needed
 
-    // Await init so the refresh-cookie restore completes before route guard runs
+    const { isLoggedIn, init } = useAuth()
     await init()
 
     const isPublic = to.path === '/login'
-
-    if (!isLoggedIn.value && !isPublic) {
-        return navigateTo('/login')
-    }
-
-    if (isLoggedIn.value && isPublic) {
-        return navigateTo('/')
-    }
+    if (!isLoggedIn.value && !isPublic) return navigateTo('/login')
+    if (isLoggedIn.value && isPublic) return navigateTo('/')
 })

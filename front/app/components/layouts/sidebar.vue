@@ -81,10 +81,21 @@ const { apiFetch } = useApi()
 const { addToast } = useToast()
 const generalLastMessage = ref<string | null>(null)
 const generalLastTime = ref<Date | null>(null)
+const generalUnreadCount = ref<number>(0)
 const generalGroupObj = computed(() => ({ 
   last_message: generalLastMessage.value,
-  last_time: generalLastTime.value 
+  last_time: generalLastTime.value,
+  unread_count: generalUnreadCount.value
 } as any))
+
+async function fetchGeneralUnread() {
+  try {
+    const res = await apiFetch<any>('/general-chat/unread')
+    if (res) {
+      generalUnreadCount.value = res.unread_count
+    }
+  } catch(e) {}
+}
 
 async function fetchGeneralLatest() {
   try {
@@ -104,6 +115,11 @@ function onNewGeneralMsg(data: any) {
   const author = data.user?.username || 'Support'
   generalLastMessage.value = `${author}: ${data.message}`
   generalLastTime.value = new Date(data.created_at)
+  fetchGeneralUnread()
+}
+
+function onGeneralChatRead() {
+  generalUnreadCount.value = 0
 }
 
 function onNewReply(data: any) {
@@ -132,15 +148,22 @@ function onNewTicket(data: any) {
 
 onMounted(() => {
   fetchGeneralLatest()
+  fetchGeneralUnread()
   subscribe('new_general_message', onNewGeneralMsg)
   subscribe('new_reply', onNewReply)
   subscribe('new_ticket', onNewTicket)
+  if (typeof window !== 'undefined') {
+    window.addEventListener('general_chat_read', onGeneralChatRead)
+  }
 })
 
 onUnmounted(() => {
   unsubscribe('new_general_message', onNewGeneralMsg)
   unsubscribe('new_reply', onNewReply)
   unsubscribe('new_ticket', onNewTicket)
+  if (typeof window !== 'undefined') {
+    window.removeEventListener('general_chat_read', onGeneralChatRead)
+  }
 })
 
 // ── Filter groups by active folder ──────────────────────────────────────────

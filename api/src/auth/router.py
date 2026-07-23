@@ -31,7 +31,7 @@ def _set_refresh_cookie(response: Response, token: str) -> None:
         secure=auth_settings.SECURE_COOKIES,
         samesite="lax",
         max_age=int(auth_settings.REFRESH_TOKEN_EXP.total_seconds()),
-        path="/auth",
+        path="/",
     )
 
 @router.post("/register", response_model=UserOut, status_code=status.HTTP_201_CREATED)
@@ -76,7 +76,7 @@ async def logout(
 ):
     if refresh_token:
         await service.revoke_refresh_token(db, refresh_token)
-    response.delete_cookie(REFRESH_COOKIE, path="/auth")
+    response.delete_cookie(REFRESH_COOKIE, path="/")
 
 @router.get("/me", response_model=UserOut)
 async def me(user: CurrentUser):

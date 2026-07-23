@@ -38,6 +38,10 @@ class Ticket(Base):
         cascade="all, delete-orphan",
         order_by="TicketAssignment.assigned_at",
     )
+    attachments: Mapped[list["Attachment"]] = relationship(
+        back_populates="ticket",
+        cascade="all, delete-orphan"
+    )
 
 
 class TicketAssignment(Base):
@@ -75,3 +79,15 @@ class GeneralChatMessage(Base):
     reply: Mapped["Reply"] = relationship()
     parent: Mapped["GeneralChatMessage"] = relationship(remote_side=[id])
     user: Mapped["User"] = relationship()
+    attachments: Mapped[list["Attachment"]] = relationship(
+        back_populates="general_chat_message",
+        cascade="all, delete-orphan"
+    )
+
+
+class GeneralChatReadState(Base):
+    __tablename__ = "general_chat_read_state"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("user.id", ondelete="CASCADE"), unique=True)
+    last_read_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())

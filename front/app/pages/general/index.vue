@@ -14,8 +14,10 @@
           :is-me="msg.is_support"
           :sender-name="msg.user?.username || 'Support'"
           :hide-text="!!msg.ticket && !msg.message?.includes('Призначив(ла)')"
-          @contextmenu.prevent="openMsgMenu($event, msg)"
       >
+        <template #controls>
+            <button class="control-btn" @click="setReply(msg)">↩ Відповісти</button>
+        </template>
         <template #extra>
           <div v-if="msg.ticket && !msg.reply" class="forwarded-message">
             <span class="forward-label">↪ Переслано тікет від {{ msg.ticket.soc_user_name }}</span>
@@ -36,17 +38,15 @@
               <span class="reply-quote-text">{{ msg.reply.message }}</span>
             </div>
             <div class="card-actions">
-              <NuxtLink :to="`/group/${msg.ticket?.group_id}#ticket-${msg.ticket_id}`" class="action-btn">
-                Відкрити тікет
+              <NuxtLink :to="`/group/${msg.ticket?.group_id}#reply-${msg.reply.id}`" class="action-btn">
+                Відкрити повідомлення
               </NuxtLink>
             </div>
           </div>
         </template>
       </chat-message>
 
-      <div v-if="menu.show" class="ctx-menu" :style="{ top: menu.y + 'px', left: menu.x + 'px' }" @click.stop>
-        <button class="ctx-item" @click="setReply(menu.msg)">↩ Відповісти</button>
-      </div>
+
 
       <div id="bottom"></div>
     </div>
@@ -77,6 +77,7 @@ import MessageInput from '~/components/form/messageInput.vue'
 import ChatMessage from '~/components/chat/message.vue'
 import {useRoute} from "#vue-router";
 import { useWebSocket } from '~/composables/useWebSocket'
+import { useIdle } from '~/composables/useIdle'
 
 const { apiFetch } = useApi()
 const { currentUser } = useAuth()
@@ -123,9 +124,23 @@ const mappedMessages = computed(() => {
     user: msg.user,
     ticket: msg.ticket,
     reply: msg.reply,
-    parent: msg.parent
+    parent: msg.parent,
+    attachments: msg.attachments
   }))
 })
+
+const { isIdle } = useIdle()
+
+async function markAsRead() {
+  if (typeof document !== 'undefined' && !document.hasFocus()) return
+  if (isIdle.value) return
+  try {
+    await apiFetch('/general-chat/read', { method: 'POST' })
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('general_chat_read'))
+    }
+  } catch (e) {}
+}
 
 async function loadMessages() {
   pending.value = true
@@ -133,6 +148,7 @@ async function loadMessages() {
   try {
     const data = await apiFetch('/general-chat/messages')
     messages.value = data
+    markAsRead()
   } catch (e: any) {
     error.value = e?.data?.detail ?? 'Помилка завантаження'
   } finally {
@@ -146,19 +162,32 @@ function onNewGeneralMessage(data: any) {
   // If we already have it (e.g. we sent it), ignore
   if (!messages.value.find(m => m.id === data.id)) {
     messages.value.push(data)
+    markAsRead()
     nextTick(() => {
       document.getElementById('bottom')?.scrollIntoView({ behavior: 'smooth' })
     })
   }
 }
 
+function handleFocus() {
+  markAsRead()
+}
+
 onMounted(() => {
   loadMessages()
   subscribe('new_general_message', onNewGeneralMessage)
+  if (typeof window !== 'undefined') {
+    window.addEventListener('focus', handleFocus)
+    window.addEventListener('user_active', handleFocus)
+  }
 })
 
 onUnmounted(() => {
   unsubscribe('new_general_message', onNewGeneralMessage)
+  if (typeof window !== 'undefined') {
+    window.removeEventListener('focus', handleFocus)
+    window.removeEventListener('user_active', handleFocus)
+  }
 })
 
 const messageAreaRef = ref<HTMLElement | null>(null)
@@ -205,41 +234,20 @@ function scrollToHash() {
   }
 }
 
-const menu = ref({ show: false, x: 0, y: 0, msg: null as any })
-async function openMsgMenu(e: MouseEvent, msg: any) {
-  let x = e.clientX
-  let y = e.clientY
-  menu.value = { show: true, x, y, msg }
-  
-  await nextTick()
-  const menuEl = document.querySelector('.ctx-menu') as HTMLElement
-  if (menuEl) {
-    const rect = menuEl.getBoundingClientRect()
-    if (x + rect.width > window.innerWidth) x = window.innerWidth - rect.width - 10
-    if (y + rect.height > window.innerHeight) y = window.innerHeight - rect.height - 10
-    menu.value.x = x
-    menu.value.y = y
-  }
-
-  document.addEventListener('click', closeCtxMenu, { once: true })
-}
-function closeCtxMenu() { menu.value.show = false }
-
 const replyingTo = ref<{ id: number; sender: string; text: string } | null>(null)
 function setReply(msg: any) {
   if (!msg) return
   replyingTo.value = { id: msg.id, sender: msg.user?.username || 'Support', text: msg.message }
-  closeCtxMenu()
   document.getElementById('message-f')?.focus()
 }
 
 
-async function sendMessage() {
-  if (!messageText.value.trim()) return
+async function sendMessage(attachmentIds: number[] = []) {
+  if (!messageText.value.trim() && attachmentIds.length === 0) return
   try {
     await apiFetch('/general-chat/messages', {
       method: 'POST',
-      body: { message: messageText.value, parent_id: replyingTo.value?.id ?? null }
+      body: { message: messageText.value, parent_id: replyingTo.value?.id ?? null, attachment_ids: attachmentIds }
     })
     messageText.value = ''
     replyingTo.value = null
@@ -267,31 +275,27 @@ async function sendMessage() {
   gap: 12px;
 }
 
-.ctx-menu {
-  position: fixed;
-  background: var(--message-bg-color);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 6px 0;
-  min-width: 140px;
-  box-shadow: 0 4px 12px rgba(0,0,0,0.2);
-  z-index: 9999;
-}
-.ctx-item {
-  display: block;
-  width: 100%;
-  text-align: left;
-  padding: 6px 16px;
-  background: none;
-  border: none;
+
+.control-btn {
+  box-sizing: border-box;
+  height: 24px;
+  padding: 0 8px;
+  font-size: 11px;
+  line-height: 22px;
+  border-radius: var(--radius);
+  background: var(--nav-bar-bg);
   color: var(--message-text-color);
-  font-size: 13px;
+  border: var(--border);
   cursor: pointer;
-  transition: background 0.1s;
+  transition: all 0.2s;
 }
-.ctx-item:hover {
-  background: var(--nav-item-bg-hover-color);
+
+.control-btn:hover {
+  background: var(--accent);
+  color: white;
+  border-color: var(--accent);
 }
+
 .goDown {
   position: absolute;
   right: 20px;

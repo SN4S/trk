@@ -13,6 +13,7 @@ export interface ApiReply {
     ticket: { id: number; name: string ;soc_user_name:string } | null
     user: { id: number; username: string } | null
     parent_reply: { id: number; message: string; user: { id: number; username: string } | null } | null
+    attachments?: { id: number; filename: string; file_url: string; content_type: string }[] | null
 }
 
 
@@ -45,7 +46,8 @@ export function useRepliesT(ticketId?: MaybeRef<number | null>) {
             if (role === 'support') {
                 params.assigned_to_id = currentUser.value.id
             } else if (role === 'admin' || role === 'manager') {
-                params.assigned_by_id = currentUser.value.id
+                params.unassigned = true
+                params.assigned_to_id = currentUser.value.id
             }
         }
 
@@ -107,7 +109,8 @@ export function useRepliesG(groupId?: MaybeRef<number | null>) {
             if (role === 'support') {
                 params.assigned_to_id = currentUser.value.id
             } else if (role === 'admin' || role === 'manager') {
-                params.assigned_by_id = currentUser.value.id
+                params.unassigned = true
+                params.assigned_to_id = currentUser.value.id
             }
         }
 

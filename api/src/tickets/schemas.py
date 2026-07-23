@@ -6,6 +6,7 @@ from pydantic import BaseModel, Field, model_validator
 from src.schemas import UtcDatetime
 from src.tickets.models import TicketStatus
 from src.replies.schemas import ReplyOut
+from src.attachments.schemas import AttachmentOut
 
 
 class TicketCreate(BaseModel):
@@ -15,6 +16,7 @@ class TicketCreate(BaseModel):
     soc_user_id: int
     soc_user_name: str = Field(min_length=1, max_length=255)
     message: str | None = Field(default=None, max_length=4000)
+    attachment_ids: list[int] = Field(default_factory=list)
 
 
 class TicketUpdate(BaseModel):
@@ -22,6 +24,7 @@ class TicketUpdate(BaseModel):
     theme_id: int | None = None
     group_id: int | None = None
     message: str | None = Field(default=None, max_length=4000)
+    attachment_ids: list[int] = Field(default_factory=list)
 
 
 class TicketAssign(BaseModel):
@@ -72,6 +75,7 @@ class TicketOut(BaseModel):
     group: GroupInTicket | None = None
     # The latest assignment entry; None if never assigned
     current_assignment: TicketAssignmentOut | None = None
+    attachments: list[AttachmentOut] = Field(default_factory=list)
 
     model_config = {"from_attributes": True}
 
@@ -98,8 +102,15 @@ class TicketStats(BaseModel):
 
 
 class GeneralChatMessageCreate(BaseModel):
-    message: str = Field(min_length=1, max_length=4000)
+    message: str = Field(default="", max_length=4000)
     parent_id: int | None = None
+    attachment_ids: list[int] = Field(default_factory=list)
+
+    @model_validator(mode='after')
+    def validate_content(self) -> 'GeneralChatMessageCreate':
+        if not self.message.strip() and not self.attachment_ids:
+            raise ValueError('Message cannot be empty without attachments')
+        return self
 
 
 class GeneralChatParentPreview(BaseModel):
@@ -121,5 +132,6 @@ class GeneralChatMessageOut(BaseModel):
     reply: ReplyOut | None = None
     parent: GeneralChatParentPreview | None = None
     user: UserInTicket | None = None
+    attachments: list[AttachmentOut] = Field(default_factory=list)
 
     model_config = {"from_attributes": True}

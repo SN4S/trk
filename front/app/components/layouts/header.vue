@@ -79,7 +79,6 @@ const { stats } = useTicketStats(groupId)
   display: grid;
   grid-template-columns: repeat(4, 1fr);
   gap: 0.5rem;
-  margin: 0.5rem 0rem;
 }
 
 .folders_block {

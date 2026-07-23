@@ -1,15 +1,23 @@
 from datetime import datetime
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from src.schemas import UtcDatetime
+from src.attachments.schemas import AttachmentOut
 
 
 class ReplyCreate(BaseModel):
-    message: str = Field(min_length=1, max_length=4000)
+    message: str = Field(default="", max_length=4000)
     is_support: bool
     requires_client_reply: bool = False
     reply_to_reply_id: int | None = None
+    attachment_ids: list[int] = Field(default_factory=list)
+
+    @model_validator(mode='after')
+    def validate_content(self) -> 'ReplyCreate':
+        if not self.message.strip() and not self.attachment_ids:
+            raise ValueError('Message cannot be empty without attachments')
+        return self
 
 
 class UserInReply(BaseModel):
@@ -35,5 +43,6 @@ class ReplyOut(BaseModel):
     reply_to_reply_id: int | None = None
     user: UserInReply | None = None
     parent_reply: ParentReplyPreview | None = None
+    attachments: list[AttachmentOut] = Field(default_factory=list)
 
     model_config = {"from_attributes": True}

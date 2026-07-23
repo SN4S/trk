@@ -17,21 +17,32 @@
       <button class="cancel_reply" @click="emit('cancelReply')" title="Скасувати">✕</button>
     </div>
 
+    <!-- Attachments Preview -->
+    <div v-if="attachments.length > 0" class="attachments-preview">
+      <div v-for="att in attachments" :key="att.id" class="attachment-item">
+        <span class="attachment-name">{{ att.filename }}</span>
+        <button class="remove-attachment" @click="removeAttachment(att.id)" title="Видалити">✕</button>
+      </div>
+    </div>
+
     <!-- Input Bar -->
     <div class="input_bar">
+      <button class="attach-btn" @click="$refs.fileInput.click()" :disabled="isUploading">📎</button>
+      <input type="file" ref="fileInput" multiple style="display: none" @change="onFileSelected" />
       <div class="mention-wrap">
-      <input 
+      <textarea
         id="message-f" 
         placeholder="Написати..." 
         :value="modelValue"
         @input="onInput"
         @keydown="onKeydown"
-      />
+        rows="1"
+      ></textarea>
         <ul v-if="showMentions" class="mention-list">
           <li v-for="u in filteredUsers" :key="u.id" @mousedown.prevent="pickMention(u.username)">@{{ u.username }}</li>
         </ul>
       </div>
-      <button @click="onSend" :disabled="!modelValue.trim() && !replyingToTicket && !replyingToMessage">➤</button>
+      <button class="send-button" @click="onSend" :disabled="(!modelValue.trim() && !attachments.length && !replyingToTicket && !replyingToMessage) || isUploading">➤</button>
     </div>
   </div>
 </template>
@@ -39,6 +50,8 @@
 <script setup lang="ts">
 import type { ApiTicket } from '~/composables/useTickets'
 const { currentUser } = useAuth()
+const { apiFetch } = useApi()
+const { addToast } = useToast()
 
 const props = defineProps<{
   modelValue: string
@@ -48,6 +61,37 @@ const props = defineProps<{
 
 import { useMentionableUsers } from '~/composables/useMentionableUsers'
 const { users: mentionableUsers } = useMentionableUsers()
+
+const attachments = ref<any[]>([])
+const isUploading = ref(false)
+
+async function onFileSelected(e: Event) {
+  const target = e.target as HTMLInputElement
+  if (!target.files || target.files.length === 0) return
+
+  isUploading.value = true
+  for (let i = 0; i < target.files.length; i++) {
+    const file = target.files[i]
+    const formData = new FormData()
+    formData.append('file', file)
+    
+    try {
+      const res = await apiFetch<any>('/attachments/upload', {
+        method: 'POST',
+        body: formData
+      })
+      attachments.value.push(res)
+    } catch (err: any) {
+      addToast({ title: 'Помилка', message: `Не вдалося завантажити ${file.name}`, type: 'error' })
+    }
+  }
+  isUploading.value = false
+  target.value = '' // reset input
+}
+
+function removeAttachment(id: number) {
+  attachments.value = attachments.value.filter(a => a.id !== id)
+}
 
 const mentionQuery = computed(() => {
   const m = props.modelValue.match(/@(\w*)$/)
@@ -71,16 +115,28 @@ function pickMention(username: string) {
 
 const emit = defineEmits<{
   (e: 'update:modelValue', val: string): void
-  (e: 'send'): void
+  (e: 'send', attachmentIds: number[]): void
   (e: 'cancelReply'): void
 }>()
 
 function onInput(e: Event) {
-  emit('update:modelValue', (e.target as HTMLInputElement).value)
+  const target = e.target as HTMLTextAreaElement
+  target.style.height = 'auto'
+  target.style.height = target.scrollHeight + 'px'
+  emit('update:modelValue', target.value)
 }
 
 function onSend() {
-  if (props.modelValue.trim() || props.replyingToTicket || props.replyingToMessage) emit('send')
+  if (props.modelValue.trim() || attachments.value.length > 0 || props.replyingToTicket || props.replyingToMessage) {
+    const ids = attachments.value.map(a => a.id)
+    emit('send', ids)
+    attachments.value = []
+
+    setTimeout(() => {
+      const el = document.getElementById('message-f')
+      if (el) el.style.height = 'auto'
+    }, 0)
+  }
 }
 
 function onKeydown(e: KeyboardEvent) {
@@ -148,6 +204,58 @@ function onKeydown(e: KeyboardEvent) {
   color: var(--message-text-color);
 }
 
+.attachments-preview {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 8px 16px;
+  background: var(--nav-bar-bg);
+  border-bottom: 1px solid var(--border);
+}
+
+.attachment-item {
+  display: flex;
+  align-items: center;
+  background: rgba(0,0,0,0.05);
+  border-radius: 4px;
+  padding: 4px 8px;
+  font-size: 12px;
+}
+
+.attachment-name {
+  margin-right: 8px;
+  max-width: 150px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.remove-attachment {
+  background: none;
+  border: none;
+  color: var(--message-time-color);
+  cursor: pointer;
+}
+.remove-attachment:hover {
+  color: red;
+}
+
+.attach-btn {
+  background: none;
+  border: none;
+  font-size: 18px;
+  cursor: pointer;
+  padding: 4px 8px;
+  color: var(--message-time-color);
+}
+.attach-btn:hover {
+  color: var(--message-text-color);
+}
+.attach-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .input_bar {
   display: flex;
   gap: 0.5rem;
@@ -163,6 +271,11 @@ function onKeydown(e: KeyboardEvent) {
   padding: 10px 16px;
   color: var(--message-text-color);
   outline: none;
+  resize: none;
+  min-height: 40px;
+  max-height: 150px;
+  font-family: inherit;
+  line-height: 1.4;
 }
 
 .mention-wrap { position: relative; flex: 1; }
@@ -183,7 +296,7 @@ function onKeydown(e: KeyboardEvent) {
 .mention-list li { padding: 6px 12px; font-size: 13px; cursor: pointer; }
 .mention-list li:hover { background: var(--nav-item-bg-hover-color); }
 
-.input_bar button {
+.input_bar .send-button {
   background: var(--nav-item-bg-active-color);
   border: none;
   color: #fff;
@@ -195,7 +308,7 @@ function onKeydown(e: KeyboardEvent) {
   align-items: center;
   justify-content: center;
 }
-.input_bar button:disabled {
+.input_bar .send-button:disabled {
   opacity: 0.5;
   cursor: not-allowed;
 }

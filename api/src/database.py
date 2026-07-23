@@ -23,3 +23,4 @@ from src.folders import models as _folders_models    # noqa: E402,F401
 from src.themes import models as _themes_models      # noqa: E402,F401
 from src.replies import models as _replies_models    # noqa: E402,F401
 from src.notifications import model as _notifications_model # noqa: E402,F401
+from src.attachments import models as _attachments_models # noqa: E402,F401

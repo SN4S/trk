@@ -36,6 +36,7 @@ async def list_tickets(
     search: str | None = Query(default=None, min_length=1, max_length=200, description="Search in ticket number, message body, and theme name"),
     assigned_to_id: int | None = Query(default=None, description="Support filter: tickets currently assigned TO this user"),
     assigned_by_id: int | None = Query(default=None, description="Manager/Admin filter: tickets where any assignment was made BY this user"),
+    unassigned: bool | None = Query(default=None, description="Filter tickets that have no active assignment"),
 ):
     return await service.get_all(
         db,
@@ -45,6 +46,7 @@ async def list_tickets(
         search=search,
         assigned_to_id=assigned_to_id,
         assigned_by_id=assigned_by_id,
+        unassigned=unassigned,
     )
 
 
@@ -61,6 +63,7 @@ async def create_ticket(
         group_id=data.group_id,
         soc_user_id=data.soc_user_id,
         message=data.message,
+        attachment_ids=data.attachment_ids,
     )
 
 
@@ -144,7 +147,22 @@ async def create_general_chat_message(
     user: CurrentUser,
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
-    return await service.create_general_chat_message(db, user.id, data.message, data.parent_id)
+    return await service.create_general_chat_message(db, user.id, data.message, data.parent_id, data.attachment_ids)
+
+@general_chat_router.get("/unread")
+async def get_general_chat_unread(
+    user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    return {"unread_count": await service.get_general_chat_unread_count(db, user.id)}
+
+@general_chat_router.post("/read", status_code=status.HTTP_204_NO_CONTENT)
+async def mark_general_chat_read(
+    user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    await service.mark_general_chat_read(db, user.id)
+
 
 @router.post("/{ticket_id}/forward", response_model=GeneralChatMessageOut, status_code=status.HTTP_201_CREATED)
 async def forward_ticket_to_general_chat(

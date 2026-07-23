@@ -13,6 +13,9 @@
           {{ isGlobal ? (group?.last_message || 'General group') : (group?.last_message ? group.last_message : (group?.tg_group_id ? `TG: ${group.tg_group_id}` : 'Telegram group')) }}
         </div>
       </div>
+      <div v-if="group?.unread_count" class="unread-badge">
+        {{ group.unread_count > 99 ? '99+' : group.unread_count }}
+      </div>
     </div>
   </NuxtLink>
 </template>
@@ -65,6 +68,21 @@ const formattedLastTime = computed(() => {
   border-bottom: var(--border);
   cursor: pointer;
   transition: background-color 0.2s ease;
+}
+
+.unread-badge {
+  flex-shrink: 0;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: 10px;
+  background: var(--danger);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .group-container:hover {

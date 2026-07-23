@@ -8,6 +8,7 @@ export interface TicketStats {
 
 export function useTicketStats(groupId: MaybeRefOrGetter<number | null>) {
     const { apiFetch } = useApi()
+    const { subscribe, unsubscribe } = useWebSocket()
     const stats = useState<TicketStats | null>(`ticket-stats:${toValue(groupId) ?? 'all'}`, () => null)
     const pending = useState(`ticket-stats:pending:${toValue(groupId) ?? 'all'}`, () => false)
     const error = useState<string | null>(`ticket-stats:error:${toValue(groupId) ?? 'all'}`, () => null)
@@ -30,6 +31,20 @@ export function useTicketStats(groupId: MaybeRefOrGetter<number | null>) {
     }
 
     watch(() => toValue(groupId), fetchStats, { immediate: true })
+
+    function onTicketEvent() {
+        fetchStats()
+    }
+
+    onMounted(() => {
+        subscribe('new_ticket', onTicketEvent)
+        subscribe('update_ticket', onTicketEvent)
+    })
+
+    onUnmounted(() => {
+        unsubscribe('new_ticket', onTicketEvent)
+        unsubscribe('update_ticket', onTicketEvent)
+    })
 
     return { stats, pending, error, refresh: fetchStats }
 }

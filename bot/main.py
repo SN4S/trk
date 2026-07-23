@@ -13,6 +13,24 @@ from telegram.error import BadRequest
 
 from database.models import init_engine, create_tables
 from database import service
+import httpx
+import os
+import tempfile
+
+async def upload_telegram_file(file, filename, content_type) -> int | None:
+    api_url = os.getenv("API_URL", "http://localhost:8000")
+    internal_secret = os.getenv("INTERNAL_API_SECRET", "")
+    try:
+        content = await file.download_as_bytearray()
+        async with httpx.AsyncClient() as client:
+            files = {'file': (filename, bytes(content), content_type)}
+            headers = {"X-Bot-Token": internal_secret}
+            resp = await client.post(f"{api_url}/attachments/upload", files=files, headers=headers, timeout=30.0)
+            if resp.status_code == 201:
+                return resp.json().get("id")
+    except Exception as e:
+        print(f"File upload error: {e}")
+    return None
 
 THEME, MESSAGE, CONFIRM, ADDINFO, ADDINFO_PICK, ADDINFO_CONFIRM = range(6)
 
@@ -145,7 +163,8 @@ async def support_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     kb = [[InlineKeyboardButton(t.name, callback_data=f"theme_{t.id}")] for t in themes]
     kb.append([InlineKeyboardButton("❌ Скасувати", callback_data="cancel_cmd")])
     
-    text = f"@{update.effective_user.username or update.effective_user.first_name}, оберіть тему звернення:"
+    sender_name = f"@{update.effective_user.username}" if update.effective_user.username else update.effective_user.first_name
+    text = f"{sender_name}, оберіть тему звернення:"
     if update.callback_query:
         await update.callback_query.answer()
         msg = await context.bot.send_message(chat.id, text, reply_markup=InlineKeyboardMarkup(kb))
@@ -220,8 +239,24 @@ async def get_addinfo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ticket_num = context.user_data["addinfo_num"]
     reply_to_tg_msg_id = context.user_data.get("reply_to_tg_msg_id")
 
-    reply_text = update.message.text
+    reply_text = update.message.caption or update.message.text or ""
     context.user_data["reply_message"] = reply_text
+    
+    attachment_ids = []
+    if update.message.photo:
+        photo = update.message.photo[-1]
+        file = await photo.get_file()
+        att_id = await upload_telegram_file(file, f"photo_{photo.file_unique_id}.jpg", "image/jpeg")
+        if att_id:
+            attachment_ids.append(att_id)
+    elif update.message.document:
+        doc = update.message.document
+        file = await doc.get_file()
+        att_id = await upload_telegram_file(file, doc.file_name or f"doc_{doc.file_unique_id}", doc.mime_type or "application/octet-stream")
+        if att_id:
+            attachment_ids.append(att_id)
+            
+    context.user_data["attachment_ids"] = attachment_ids
     
     await delete_user_msg(update)
 
@@ -257,13 +292,15 @@ async def get_addinfo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("Скасувати", callback_data="cancel_cmd")],
     ])
 
+    attachments_str = f"\nВкладення: {len(attachment_ids)} файл(ів)\n" if attachment_ids else ""
     text = (
         f"Додаткова інформація до тікету #{ticket_num}\n\n"
-        f"Повідомлення: {reply_text}\n\n"
+        f"Повідомлення: {reply_text}{attachments_str}\n\n"
         f"Відправити?"
     )
     if update.effective_chat.type != "private":
-        text = f"@{update.effective_user.username or update.effective_user.first_name}, {text}"
+        sender_name = f"@{update.effective_user.username}" if update.effective_user.username else update.effective_user.first_name
+        text = f"{sender_name}, {text}"
 
     await step(update, context, text, kb)
     return ADDINFO_CONFIRM
@@ -274,7 +311,8 @@ async def edit_reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     text = "Введіть новий текст додаткової інформації:"
     if q.message.chat.type != "private":
-        text = f"@{update.effective_user.username or update.effective_user.first_name}, {text}"
+        sender_name = f"@{update.effective_user.username}" if update.effective_user.username else update.effective_user.first_name
+        text = f"{sender_name}, {text}"
         cancel_inline = InlineKeyboardMarkup([[InlineKeyboardButton("❌ Скасувати", callback_data="cancel_cmd")]])
         msg = await context.bot.send_message(q.message.chat_id, text, reply_markup=cancel_inline)
     else:
@@ -302,11 +340,11 @@ async def confirm_reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
     reply_text = context.user_data["reply_message"]
 
     chat_type = update.effective_chat.type
-    user_name = update.effective_user.username or update.effective_user.first_name
+    user_name = f"@{update.effective_user.username}" if update.effective_user.username else update.effective_user.first_name
 
     if chat_type != "private":
         confirm_text = (
-            f"✅ @{user_name}, інформацію додано до тікету #{ticket_num}\n"
+            f"✅ {user_name}, інформацію додано до тікету #{ticket_num}\n"
             f"Повідомлення: {reply_text}"
         )
     else:
@@ -336,15 +374,17 @@ async def confirm_reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_text, 
         is_support=False, 
         tg_message_id=confirm_msg.message_id,
-        reply_to_reply_id=reply_to_reply_id
+        reply_to_reply_id=reply_to_reply_id,
+        attachment_ids=context.user_data.get("attachment_ids")
     )
 
     ticket = await service.get_ticket_by_num(ticket_num)
     if ticket and ticket.group and ticket.group.tg_group_id:
         if chat_type == "private":
+            att_str = f"\n📎 Вкладень: {len(context.user_data.get('attachment_ids', []))}" if context.user_data.get('attachment_ids') else ""
             await context.bot.send_message(
                 ticket.group.tg_group_id,
-                f"💬 Додаткова інформація по тікету #{ticket_num}:\n{reply_text}"
+                f"💬 Додаткова інформація по тікету #{ticket_num}:\n{reply_text}{att_str}"
             )
 
     context.user_data.clear()
@@ -370,11 +410,12 @@ async def choose_theme(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     chat_type = q.message.chat.type
     if chat_type != "private":
+        sender_name = f"@{user.username}" if user.username else user.first_name
         cancel_inline = InlineKeyboardMarkup([[InlineKeyboardButton("❌ Скасувати", callback_data="cancel_cmd")]])
         await q.edit_message_text(f"Заявка №{ticket.ticket_num}\nТема: {context.user_data['ticket_theme']}\n")
         msg = await context.bot.send_message(
             q.message.chat_id,
-            f"@{user.username or user.first_name}, введіть текст звернення:",
+            f"{sender_name}, введіть текст звернення:",
             reply_markup=cancel_inline,
         )
     else:
@@ -392,9 +433,26 @@ async def get_message(update, context):
     if update.message.text == CANCEL_BTN:
         return await cancel_cmd(update, context)
 
-    context.user_data["message"] = update.message.text
-    await delete_user_msg(update)
+    message_text = update.message.caption or update.message.text or ""
+    context.user_data["message"] = message_text
+    
+    attachment_ids = []
+    if update.message.photo:
+        photo = update.message.photo[-1]
+        file = await photo.get_file()
+        att_id = await upload_telegram_file(file, f"photo_{photo.file_unique_id}.jpg", "image/jpeg")
+        if att_id:
+            attachment_ids.append(att_id)
+    elif update.message.document:
+        doc = update.message.document
+        file = await doc.get_file()
+        att_id = await upload_telegram_file(file, doc.file_name or f"doc_{doc.file_unique_id}", doc.mime_type or "application/octet-stream")
+        if att_id:
+            attachment_ids.append(att_id)
+            
+    context.user_data["attachment_ids"] = attachment_ids
 
+    await delete_user_msg(update)
 
     prompt_msg_id = context.user_data.get("prompt_msg_id")
     if prompt_msg_id:
@@ -412,14 +470,17 @@ async def get_message(update, context):
         [InlineKeyboardButton("Редагувати", callback_data="edit_msg")],
         [InlineKeyboardButton("Скасувати", callback_data="cancel_cmd")],
     ])
+    
+    attachments_str = f"\nВкладення: {len(attachment_ids)} файл(ів)\n" if attachment_ids else ""
     text = (
         f"Номер заявки: {context.user_data['ticket_num']}\n\n"
         f"Тема: {context.user_data['ticket_theme']}\n"
-        f"Повідомлення: {context.user_data['message']}\n\n"
+        f"Повідомлення: {message_text}{attachments_str}\n\n"
         f"Відправити?"
     )
     if update.effective_chat.type != "private":
-        text = f"@{update.effective_user.username or update.effective_user.first_name}, {text}"
+        sender_name = f"@{update.effective_user.username}" if update.effective_user.username else update.effective_user.first_name
+        text = f"{sender_name}, {text}"
         
     await step(update, context, text, kb)
     return CONFIRM
@@ -430,7 +491,8 @@ async def edit_msg(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     text = "Введіть новий текст звернення:"
     if q.message.chat.type != "private":
-        text = f"@{update.effective_user.username or update.effective_user.first_name}, {text}"
+        sender_name = f"@{update.effective_user.username}" if update.effective_user.username else update.effective_user.first_name
+        text = f"{sender_name}, {text}"
         cancel_inline = InlineKeyboardMarkup([[InlineKeyboardButton("❌ Скасувати", callback_data="cancel_cmd")]])
         msg = await context.bot.send_message(q.message.chat_id, text, reply_markup=cancel_inline)
     else:
@@ -452,9 +514,11 @@ async def confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return await cancel_cmd(update, context)
 
     user = update.effective_user
+    attachment_ids = context.user_data.get("attachment_ids")
     ticket = await service.finalize_ticket(
         context.user_data["ticket_id"],
         context.user_data["message"],
+        attachment_ids=attachment_ids,
     )
 
     if q.message.chat.type == "private":
@@ -469,15 +533,17 @@ async def confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
     message_text = ticket.message or "(без тексту)"
     
     status_ua = _status_ua(ticket.status)
+    sender_name = f"@{user.username}" if user.username else user.first_name
     
     # In groups, we just drop the finalized ticket to the group
+    att_str = f"\n📎 Вкладень: {len(attachment_ids)}" if attachment_ids else ""
     msg = await context.bot.send_message(
         context.user_data["group_chat_id"],
         f"🎫 Тікет #{ticket.ticket_num}\n\n"
         f"Тема: {context.user_data['ticket_theme']}\n"
         f"Статус: {status_ua}\n"
-        f"Від: @{user.username or user.first_name}\n"
-        f"Повідомлення: {message_text}",
+        f"Від: {sender_name}\n"
+        f"Повідомлення: {message_text}{att_str}",
         reply_markup=kb
     )
     await service.set_ticket_tg_message_id(ticket.id, msg.message_id)
@@ -612,7 +678,8 @@ async def pick_ticket(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await q.edit_message_text(f"Тікет #{ticket.ticket_num} закритий. Додавати відповіді заборонено.")
             await _restore_main_kb(context, q.message.chat_id, "Головне меню")
         else:
-            await context.bot.send_message(q.message.chat_id, f"@{update.effective_user.username or update.effective_user.first_name}, тікет #{ticket.ticket_num} закритий. Додавати відповіді заборонено.")
+            sender_name = f"@{update.effective_user.username}" if update.effective_user.username else update.effective_user.first_name
+            await context.bot.send_message(q.message.chat_id, f"{sender_name}, тікет #{ticket.ticket_num} закритий. Додавати відповіді заборонено.")
         return ConversationHandler.END
 
     context.user_data["addinfo_id"] = ticket.id
@@ -621,10 +688,11 @@ async def pick_ticket(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     chat_type = q.message.chat.type
     if chat_type != "private":
+        sender_name = f"@{update.effective_user.username}" if update.effective_user.username else update.effective_user.first_name
         cancel_inline = InlineKeyboardMarkup([[InlineKeyboardButton("❌ Скасувати", callback_data="cancel_cmd")]])
         msg = await context.bot.send_message(
             q.message.chat_id,
-            f"@{update.effective_user.username or update.effective_user.first_name}, введіть відповідь для тікету #{ticket.ticket_num}:",
+            f"{sender_name}, введіть відповідь для тікету #{ticket.ticket_num}:",
             reply_markup=cancel_inline,
             reply_to_message_id=q.message.message_id
         )
@@ -655,7 +723,7 @@ conv = ConversationHandler(
             CallbackQueryHandler(cancel_cmd, pattern=r"^cancel_cmd$")
         ],
         MESSAGE: [
-            MessageHandler(filters.TEXT & ~filters.COMMAND, get_message),
+            MessageHandler(filters.TEXT | filters.PHOTO | filters.Document.ALL & ~filters.COMMAND, get_message),
             CallbackQueryHandler(cancel_cmd, pattern=r"^cancel_cmd$")
         ],
         CONFIRM: [
@@ -668,7 +736,7 @@ conv = ConversationHandler(
             CallbackQueryHandler(close_tickets, pattern=r"^close_tickets$"),
         ],
         ADDINFO: [
-            MessageHandler(filters.TEXT & ~filters.COMMAND, get_addinfo),
+            MessageHandler(filters.TEXT | filters.PHOTO | filters.Document.ALL & ~filters.COMMAND, get_addinfo),
             CallbackQueryHandler(cancel_cmd, pattern=r"^cancel_cmd$")
         ],
         ADDINFO_CONFIRM: [

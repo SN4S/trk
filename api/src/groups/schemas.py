@@ -17,6 +17,7 @@ class GroupOut(BaseModel):
     tg_group_id: int | None
     last_message: str | None = None
     last_time: UtcDatetime | None = None
+    unread_count: int = 0
 
     model_config = {"from_attributes": True}
 

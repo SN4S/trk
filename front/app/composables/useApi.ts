@@ -1,8 +1,7 @@
 import { useAuth } from "~/composables/useAuth";
 
 export function useApi() {
-    const config = useRuntimeConfig()
-    const baseURL = config.public.apiBase as string
+    const baseURL = useBaseUrl()
     const { accessToken, refresh, logout } = useAuth()
 
     async function apiFetch<T>(path: string, options: Parameters<typeof $fetch>[1] = {}): Promise<T> {

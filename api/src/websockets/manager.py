@@ -30,7 +30,9 @@ class ConnectionManager:
                 self.disconnect(dead, user_id)
 
     async def broadcast(self, message: dict):
-        for user_id in list(self.active_connections.keys()):
-            await self.send_personal_message(message, user_id)
+        import asyncio
+        tasks = [self.send_personal_message(message, user_id) for user_id in self.active_connections.keys()]
+        if tasks:
+            await asyncio.gather(*tasks)
 
 manager = ConnectionManager()
